@@ -83,6 +83,7 @@ export default function BookingPage() {
 
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [detailsMsg, setDetailsMsg] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<{ order_ref: string; total: number } | null>(null);
 
   const [monthOffset, setMonthOffset] = useState(0);
@@ -106,6 +107,11 @@ export default function BookingPage() {
       return next;
     });
   }, [kidsCount]);
+
+  // Clear any validation message as soon as the thing it complained about changes.
+  useEffect(() => {
+    setDetailsMsg(null);
+  }, [adults, kidsCount, allSwimmers, date, boardType]);
 
   const kidsUnder12 = kidsAges.filter((a) => a < KID_AGE_CUTOFF).length;
   const kids12Plus = kidsAges.filter((a) => a >= KID_AGE_CUTOFF).length;
@@ -205,6 +211,27 @@ export default function BookingPage() {
     (!wantsSurf || adults === 0 || allSwimmers !== "") &&
     (!wantsBoard || !!boardType);
 
+  function goToContact() {
+    if (wantsSurf && adults === 0 && kidsCount === 0) {
+      setDetailsMsg("Add at least one adult or child.");
+      return;
+    }
+    if (wantsSurf && adults > 0 && allSwimmers === "") {
+      setDetailsMsg("Please answer the swimmer question above.");
+      return;
+    }
+    if (!date) {
+      setDetailsMsg("Please pick a date on the calendar above.");
+      return;
+    }
+    if (wantsBoard && !boardType) {
+      setDetailsMsg("Please choose a board type.");
+      return;
+    }
+    setDetailsMsg(null);
+    setStage("contact");
+  }
+
   function summaryLines(): string[] {
     const lines: string[] = [];
     if (wantsSurf && price) {
@@ -264,7 +291,7 @@ export default function BookingPage() {
     setBoardType(boardTypes[0]?.key ?? ""); setBoardQuantity(1); setBoardPricing("hourly"); setBoardStart(""); setBoardHours(2);
     setDate(""); setTime(TIME_SLOTS[0]);
     setName(""); setPhone(""); setEmail(""); setNotes("");
-    setConfirmation(null); setErrorMsg(null);
+    setConfirmation(null); setErrorMsg(null); setDetailsMsg(null);
     setStage("type");
   }
 
@@ -275,7 +302,7 @@ export default function BookingPage() {
 
   return (
     <div className="min-h-screen bg-surface font-sans2 text-slate">
-      <div className={`mx-auto max-w-2xl px-5 py-10 ${stage === "details" || stage === "contact" ? "pb-28" : ""}`}>
+      <div className="mx-auto max-w-2xl px-5 py-10">
         <div className="overflow-hidden rounded-tl-[32px] rounded-br-[32px] border border-line2 bg-white">
           {/* ── Unified header strip (same window as the form) ───────────── */}
           <div className="flex items-center justify-between border-b border-line2 px-6 py-5">
@@ -467,7 +494,14 @@ export default function BookingPage() {
 
               {/* Date & time */}
               <div>
-                <span className={labelCls}>Date</span>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className={labelCls}>Date</span>
+                  {date && (
+                    <span className="rounded-md bg-accent-ink px-2 py-0.5 font-mono2 text-[11px] font-semibold text-accent">
+                      Selected: {date}
+                    </span>
+                  )}
+                </div>
                 {loadingCalendar ? (
                   <div className="grid grid-cols-7 gap-1.5">
                     {Array.from({ length: 35 }).map((_, i) => <div key={i} className="aspect-square animate-pulse rounded-md bg-surface2" />)}
@@ -485,24 +519,30 @@ export default function BookingPage() {
                     <div className="grid grid-cols-7 gap-1.5">
                       {monthDates.length > 0 && Array.from({ length: (new Date(monthDates[0] + "T00:00:00").getDay() + 6) % 7 }).map((_, i) => <div key={`e${i}`} />)}
                       {monthDates.map((d) => {
+                        const isPast = d < todayStr(1);
+                        // Past days aren't bookable — leave the cell blank instead of
+                        // cluttering the grid with crossed-out numbers.
+                        if (isPast) return <div key={d} />;
                         const info = dayInfo[d];
                         const free = info ? info.free : cap;
-                        const isPast = d < todayStr(1);
                         const isFull = wantsSurf && free <= 0;
-                        const disabled = isPast || isFull;
+                        const disabled = isFull;
                         const isLow = !disabled && free <= 3 && wantsSurf;
                         const isToday = d === todayStr();
                         const isSelected = d === date;
                         const day = Number(d.slice(-2));
                         let cls = "group relative aspect-square flex flex-col items-center justify-center rounded-md border font-mono2 text-xs font-medium transition-all duration-150 ";
                         if (disabled) cls += "border-transparent bg-surface2 text-slate-soft/40 line-through cursor-not-allowed";
-                        else if (isSelected) cls += "border-accent bg-accent text-white";
+                        else if (isSelected) cls += "border-accent bg-accent text-white ring-2 ring-accent ring-offset-2 scale-105 shadow-sm";
                         else if (isToday) cls += "border-accent text-accent hover:-translate-y-0.5";
                         else cls += "border-line2 text-slate hover:-translate-y-0.5 hover:border-accent hover:text-accent";
                         return (
                           <button key={d} type="button" disabled={disabled} onClick={() => selectDate(d)} className={cls}>
+                            {isSelected && (
+                              <span className="absolute -top-1.5 -right-1.5 flex h-4 w-4 items-center justify-center rounded-full bg-slate text-[9px] font-bold text-white">✓</span>
+                            )}
                             <span>{day}</span>
-                            {!disabled && wantsSurf && <span className={`mt-0.5 text-[8px] leading-none ${isLow && !isSelected ? "text-accent" : "opacity-60"}`}>{free}</span>}
+                            {!disabled && wantsSurf && <span className={`mt-0.5 text-[8px] leading-none ${isSelected ? "text-white/80" : isLow ? "text-accent" : "opacity-60"}`}>{free}</span>}
                           </button>
                         );
                       })}
@@ -532,7 +572,24 @@ export default function BookingPage() {
                 </div>
               )}
 
-              {!detailsReady && <p className="text-center text-xs text-slate-soft">Pick a date{wantsSurf && adults > 0 && allSwimmers === "" ? " and answer the swimmer question" : ""} to continue.</p>}
+              {detailsMsg && (
+                <p className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-center text-sm font-semibold text-red-600">{detailsMsg}</p>
+              )}
+
+              <div className="flex gap-2 border-t border-line2 pt-5">
+                <button
+                  onClick={() => setStage("type")}
+                  className="rounded-md border border-line2 px-4 py-3.5 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={goToContact}
+                  className="flex-1 rounded-md bg-accent px-5 py-3.5 text-base font-bold text-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate"
+                >
+                  Continue →
+                </button>
+              </div>
             </div>
           )}
 
@@ -563,46 +620,32 @@ export default function BookingPage() {
               </div>
 
               {errorMsg && <p className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">{errorMsg}</p>}
+
+              <div className="flex gap-2 border-t border-line2 pt-5">
+                <button
+                  onClick={() => setStage("details")}
+                  className="rounded-md border border-line2 px-4 py-3.5 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={() => {
+                    if (!name.trim() || !phone.trim()) {
+                      setErrorMsg("Please fill in your name and phone number.");
+                      return;
+                    }
+                    submit();
+                  }}
+                  disabled={submitting}
+                  className="flex-1 rounded-md bg-accent px-5 py-3.5 text-base font-bold text-white shadow-sm transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  {submitting ? "Submitting…" : "Confirm Booking"}
+                </button>
+              </div>
             </div>
           )}
         </div>
       </div>
-
-      {/* Fixed, always-visible action bar — never hidden by scrolling */}
-      {(stage === "details" || stage === "contact") && (
-        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-line2 bg-white/95 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl gap-2 px-5 py-4">
-            {stage === "details" && (
-              <>
-                <button onClick={() => setStage("type")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
-                  ← Back
-                </button>
-                <button
-                  onClick={() => setStage("contact")}
-                  disabled={!detailsReady}
-                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Continue
-                </button>
-              </>
-            )}
-            {stage === "contact" && (
-              <>
-                <button onClick={() => setStage("details")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
-                  ← Back
-                </button>
-                <button
-                  onClick={submit}
-                  disabled={submitting || !name.trim() || !phone.trim()}
-                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {submitting ? "Submitting…" : "Confirm Booking"}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
