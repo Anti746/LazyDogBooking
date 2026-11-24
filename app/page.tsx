@@ -275,7 +275,7 @@ export default function BookingPage() {
 
   return (
     <div className="min-h-screen bg-surface font-sans2 text-slate">
-      <div className="mx-auto max-w-2xl px-5 py-10">
+      <div className={`mx-auto max-w-2xl px-5 py-10 ${stage === "details" || stage === "contact" ? "pb-28" : ""}`}>
         <div className="overflow-hidden rounded-tl-[32px] rounded-br-[32px] border border-line2 bg-white">
           {/* ── Unified header strip (same window as the form) ───────────── */}
           <div className="flex items-center justify-between border-b border-line2 px-6 py-5">
@@ -520,24 +520,18 @@ export default function BookingPage() {
                 </div>
               )}
 
-              {wantsSurf && price && price.total > 0 && (
-                <p className="font-mono2 text-sm text-slate-soft">
-                  Estimated total: <span className="font-semibold text-slate">{(price.total + boardPrice).toLocaleString()} Rs</span>
-                </p>
+              {((wantsSurf && price && price.lines.length > 0) || (wantsBoard && boardPrice > 0)) && (
+                <div className="space-y-1 rounded-xl border border-line2 bg-surface p-4 font-mono2 text-xs text-slate-soft">
+                  {wantsSurf && price?.lines.map((l, i) => (
+                    <p key={i}>{l.people}x {l.courseName} — {l.amount.toLocaleString()} Rs{l.discount > 0 ? ` (-${l.discount.toLocaleString()})` : ""}</p>
+                  ))}
+                  {wantsBoard && boardPrice > 0 && boardTypeObj && (
+                    <p>{boardQuantity}x {boardTypeObj.name} — {boardPrice.toLocaleString()} Rs</p>
+                  )}
+                  <p className="pt-1 text-sm font-semibold text-slate">Estimated total: <span className="text-accent">{((price?.total ?? 0) + boardPrice).toLocaleString()} Rs</span></p>
+                </div>
               )}
 
-              <div className="flex gap-2">
-                <button onClick={() => setStage("type")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
-                  ← Back
-                </button>
-                <button
-                  onClick={() => setStage("contact")}
-                  disabled={!detailsReady}
-                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Continue
-                </button>
-              </div>
               {!detailsReady && <p className="text-center text-xs text-slate-soft">Pick a date{wantsSurf && adults > 0 && allSwimmers === "" ? " and answer the swimmer question" : ""} to continue.</p>}
             </div>
           )}
@@ -569,23 +563,46 @@ export default function BookingPage() {
               </div>
 
               {errorMsg && <p className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">{errorMsg}</p>}
+            </div>
+          )}
+        </div>
+      </div>
 
-              <div className="flex gap-2">
-                <button onClick={() => setStage("details")} className="rounded-md border border-line2 px-4 py-2.5 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
+      {/* Fixed, always-visible action bar — never hidden by scrolling */}
+      {(stage === "details" || stage === "contact") && (
+        <div className="fixed inset-x-0 bottom-0 z-50 border-t border-line2 bg-white/95 backdrop-blur">
+          <div className="mx-auto flex max-w-2xl gap-2 px-5 py-4">
+            {stage === "details" && (
+              <>
+                <button onClick={() => setStage("type")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
+                  ← Back
+                </button>
+                <button
+                  onClick={() => setStage("contact")}
+                  disabled={!detailsReady}
+                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Continue
+                </button>
+              </>
+            )}
+            {stage === "contact" && (
+              <>
+                <button onClick={() => setStage("details")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
                   ← Back
                 </button>
                 <button
                   onClick={submit}
                   disabled={submitting || !name.trim() || !phone.trim()}
-                  className="flex-1 rounded-md bg-accent px-5 py-2.5 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   {submitting ? "Submitting…" : "Confirm Booking"}
                 </button>
-              </div>
-            </div>
-          )}
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
