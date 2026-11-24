@@ -14,19 +14,21 @@ import type { Course, CourseType } from "@/lib/types";
 //
 // Visual language: organic modernism / tactile editorial — warm off-white
 // base, near-black ink, a single signal-orange accent reserved for primary
-// actions and active states, hairline borders instead of shadows, an
-// asymmetric bento header, Space Grotesk for display type and JetBrains Mono
-// for numbers, labels and statuses.
+// actions and active states, hairline borders instead of shadows, Space
+// Grotesk for display type, JetBrains Mono for numbers/labels/statuses.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Step =
   | "booking_type"
-  | "group_size"
-  | "group_size_custom"
+  | "adults_count"
+  | "adults_count_custom"
+  | "kids_count"
+  | "kids_count_custom"
+  | "kids_ages"
   | "swim_all"
   | "non_swimmer_count"
-  | "kids_count"
   | "course_type"
+  | "board_upsell"
   | "date_selection"
   | "time_selection"
   | "board_type"
@@ -45,10 +47,12 @@ type Step =
 interface FormData {
   wantsSurf: boolean;
   wantsBoard: boolean;
-  totalPeople: number;
-  nonSwimmers: number;
+  adults: number;
   kids: number;
-  courseType: CourseType;
+  kidsAges: string;
+  nonSwimmers: number;
+  swimmerCourseTypes: CourseType[];
+  courseIndex: number;
   date: string;
   time: string;
   boardType: string;
@@ -82,19 +86,22 @@ function todayStr(offset = 0): string {
 }
 
 const STEP_ORDER: Step[] = [
-  "booking_type", "group_size", "swim_all", "kids_count", "course_type",
+  "booking_type", "adults_count", "kids_count", "swim_all", "course_type", "board_upsell",
   "board_type", "board_quantity", "board_pricing", "date_selection", "time_selection",
   "contact_name", "contact_phone", "contact_email", "special_requests", "summary", "completed",
 ];
 
 const STEP_LABEL: Partial<Record<Step, string>> = {
   booking_type: "Choose service",
-  group_size: "Group size",
-  group_size_custom: "Group size",
+  adults_count: "Group size",
+  adults_count_custom: "Group size",
+  kids_count: "Group size",
+  kids_count_custom: "Group size",
+  kids_ages: "Group size",
   swim_all: "Swimming",
   non_swimmer_count: "Swimming",
-  kids_count: "Kids",
   course_type: "Course",
+  board_upsell: "Board rental",
   board_type: "Board",
   board_quantity: "Board",
   board_quantity_custom: "Board",
@@ -111,6 +118,18 @@ const STEP_LABEL: Partial<Record<Step, string>> = {
   completed: "Done",
 };
 
+const INITIAL_FORM: FormData = {
+  wantsSurf: true, wantsBoard: false, adults: 1, kids: 0, kidsAges: "", nonSwimmers: 0,
+  swimmerCourseTypes: [], courseIndex: 0, date: "", time: TIME_SLOTS[0], boardType: "",
+  boardQuantity: 1, boardPricing: "hourly", boardStart: "", boardHours: 2,
+  name: "", phone: "", email: "", notes: "",
+};
+
+const INITIAL_MESSAGE: BotMessage = {
+  text: "Hey! Welcome to LazyDog Surf. What would you like to book?",
+  options: ["Surf Lesson", "Board Rental"],
+};
+
 export default function BookingPage() {
   const [courses, setCourses] = useState<Course[]>([]);
   const [boardTypes, setBoardTypes] = useState<BoardType[]>([]);
@@ -123,30 +142,9 @@ export default function BookingPage() {
   }, []);
 
   const [step, setStep] = useState<Step>("booking_type");
-  const [form, setForm] = useState<FormData>({
-    wantsSurf: true,
-    wantsBoard: false,
-    totalPeople: 1,
-    nonSwimmers: 0,
-    kids: 0,
-    courseType: "teaser",
-    date: "",
-    time: TIME_SLOTS[0],
-    boardType: "",
-    boardQuantity: 1,
-    boardPricing: "hourly",
-    boardStart: "",
-    boardHours: 2,
-    name: "",
-    phone: "",
-    email: "",
-    notes: "",
-  });
+  const [form, setForm] = useState<FormData>(INITIAL_FORM);
   const history = useRef<{ step: Step; form: FormData }[]>([]);
-  const [message, setMessage] = useState<BotMessage>({
-    text: "Hey! Welcome to LazyDog Surf. What would you like to book?",
-    options: ["Surf Lesson", "Board Rental", "Surf Lesson + Board Rental"],
-  });
+  const [message, setMessage] = useState<BotMessage>(INITIAL_MESSAGE);
   const [inputValue, setInputValue] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -221,31 +219,31 @@ export default function BookingPage() {
       const free = info ? info.free : cap;
       if (free <= 0) return;
     }
-    go("time_selection", { date }, { text: `${date} works. Which time slot?`, options: TIME_SLOTS });
+    if (form.wantsSurf) {
+      go("time_selection", { date }, { text: `${date} works. Which time slot?`, options: TIME_SLOTS });
+    } else {
+      go("contact_name", { date }, { text: "Great! What's your name?" });
+    }
   }
 
   // ── Course options (swimmers only; kids & non-swimmers are priced automatically) ──
   const swimmerCourses = courses.filter((c) => c.type !== "kids" && c.type !== "private");
   const boardOptionNames = boardTypes.map((t) => t.name);
 
-  function swimmersCount(f: FormData): number {
-    return Math.max(0, f.totalPeople - f.kids - f.nonSwimmers);
-  }
-
   // ── Price summary (for the confirm step) ────────────────────────────────────
+  const totalPeople = form.adults + form.kids;
   const price = useMemo(() => {
     if (!courses.length || !form.wantsSurf) return null;
-    const swimmers = swimmersCount(form);
     return calcSurfLessonsPrice(
       {
-        numberOfPeople: form.totalPeople,
+        numberOfPeople: Math.max(1, totalPeople),
         numberOfKids: form.kids,
         numberOfNonSwimmers: form.nonSwimmers,
-        swimmerCourseTypes: Array.from({ length: swimmers }, () => form.courseType),
+        swimmerCourseTypes: form.swimmerCourseTypes,
       },
       courses,
     );
-  }, [courses, form.wantsSurf, form.totalPeople, form.kids, form.nonSwimmers, form.courseType]);
+  }, [courses, form.wantsSurf, totalPeople, form.kids, form.nonSwimmers, form.swimmerCourseTypes]);
 
   const boardType = boardTypes.find((t) => t.key === form.boardType);
   const boardPrice = form.wantsBoard && boardType
@@ -259,6 +257,7 @@ export default function BookingPage() {
       price.lines.forEach((l) => {
         lines.push(`${l.people}x ${l.courseName} - ${l.amount.toLocaleString()} Rs${l.discount > 0 ? ` (-${l.discount.toLocaleString()} group discount)` : ""}`);
       });
+      if (form.kids > 0 && form.kidsAges) lines.push(`Children's ages: ${form.kidsAges}`);
       lines.push(`Lesson date: ${form.date} at ${form.time}`);
     }
     if (form.wantsBoard && boardType) {
@@ -276,7 +275,7 @@ export default function BookingPage() {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const swimmers = swimmersCount(form);
+      const notesParts = [form.notes, form.kids > 0 && form.kidsAges ? `Children's ages: ${form.kidsAges}` : ""].filter(Boolean);
       const res = await fetch("/api/reservations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -284,11 +283,11 @@ export default function BookingPage() {
           customer: { first_name: form.name, last_name: "", phone: form.phone, email: form.email },
           course_date: form.date,
           course_time: form.time,
-          number_of_people: form.wantsSurf ? form.totalPeople : 1,
+          number_of_people: form.wantsSurf ? Math.max(1, totalPeople) : 1,
           number_of_kids: form.wantsSurf ? form.kids : 0,
           number_of_non_swimmers: form.wantsSurf ? form.nonSwimmers : 0,
-          swimmer_course_types: Array.from({ length: swimmers }, () => form.courseType),
-          special_requests: form.notes,
+          swimmer_course_types: form.swimmerCourseTypes,
+          special_requests: notesParts.join(" | "),
           board_rental: form.wantsBoard
             ? { board_type: form.boardType, quantity: form.boardQuantity, pricing: form.boardPricing, planned_start: form.boardStart || undefined, planned_hours: form.boardHours }
             : null,
@@ -311,15 +310,58 @@ export default function BookingPage() {
 
   function resetAll() {
     history.current = [];
-    setForm({
-      wantsSurf: true, wantsBoard: false, totalPeople: 1, nonSwimmers: 0, kids: 0, courseType: "teaser",
-      date: "", time: TIME_SLOTS[0], boardType: "", boardQuantity: 1, boardPricing: "hourly", boardStart: "",
-      boardHours: 2, name: "", phone: "", email: "", notes: "",
-    });
+    setForm(INITIAL_FORM);
     setConfirmation(null);
     setErrorMsg(null);
     setStep("booking_type");
-    setMessage({ text: "Hey! Welcome to LazyDog Surf. What would you like to book?", options: ["Surf Lesson", "Board Rental", "Surf Lesson + Board Rental"] });
+    setMessage(INITIAL_MESSAGE);
+  }
+
+  // ── Flow helpers ─────────────────────────────────────────────────────────────
+  function askKidsCount(): BotMessage {
+    return { text: "How many children will be joining?", options: ["0", "1", "2", "3", "4", "5+ (type the number)", "← Back"] };
+  }
+
+  function proceedAfterAdults(n: number) {
+    const adults = Math.max(0, n);
+    go("kids_count", { adults }, askKidsCount());
+  }
+
+  function proceedAfterKids(kids: number) {
+    if (kids > 0) {
+      go("kids_ages", { kids }, { text: `What are the ages of the ${kids} child${kids > 1 ? "ren" : ""}? (e.g. 6, 9)` });
+    } else {
+      startSwimStage({ kids: 0, kidsAges: "" });
+    }
+  }
+
+  function startSwimStage(patch: Partial<FormData>) {
+    const adults = patch.adults ?? form.adults;
+    if (adults <= 0) {
+      startCourseLoop(0, { ...patch, nonSwimmers: 0, swimmerCourseTypes: [] });
+      return;
+    }
+    const q = adults === 1 ? "Are you a swimmer?" : `Are all ${adults} adults swimmers?`;
+    go("swim_all", patch, { text: q, options: ["Yes", "No", "← Back"] });
+  }
+
+  function startCourseLoop(swimmersTotal: number, patch: Partial<FormData>) {
+    if (swimmersTotal <= 0) {
+      afterAllCourses({ ...patch, swimmerCourseTypes: [] });
+      return;
+    }
+    const opts = [...swimmerCourses.map((c) => `${c.name} - ${c.price.toLocaleString()} Rs/person`), "← Back"];
+    const label = swimmersTotal > 1 ? `Which course for surfer 1 of ${swimmersTotal}?` : "Which course would you like?";
+    go("course_type", { ...patch, swimmerCourseTypes: [], courseIndex: 0 }, { text: label, options: opts });
+  }
+
+  function afterAllCourses(patch: Partial<FormData>) {
+    if (form.wantsBoard || !form.wantsSurf) {
+      // Board rental is already decided (board-only path never reaches here).
+      go("date_selection", patch, { text: "Now, pick a date." });
+    } else {
+      go("board_upsell", patch, { text: "Would you like to add a board rental too?", options: ["Yes", "No"] });
+    }
   }
 
   // ── Step router: what happens when an option or text is chosen ─────────────
@@ -328,53 +370,65 @@ export default function BookingPage() {
 
     switch (step) {
       case "booking_type": {
-        const wantsSurf = option !== "Board Rental";
-        const wantsBoard = option !== "Surf Lesson";
-        if (wantsSurf) {
-          go("group_size", { wantsSurf, wantsBoard }, { text: "How many people will be joining the surf lesson?", options: ["1 person", "2 people", "3 people", "4 people", "5+ people (type the number)"] });
+        if (option === "Surf Lesson") {
+          go("adults_count", { wantsSurf: true, wantsBoard: false }, { text: "How many adults will be joining the surf lesson?", options: ["1", "2", "3", "4", "5+ (type the number)", "← Back"] });
         } else {
-          go("board_type", { wantsSurf, wantsBoard }, { text: "Which board would you like to rent?", options: [...boardOptionNames, "← Back"] });
+          go("board_type", { wantsSurf: false, wantsBoard: true }, { text: "Which board would you like to rent?", options: [...boardOptionNames, "← Back"] });
         }
         return;
       }
-      case "group_size": {
+      case "adults_count": {
         if (option.startsWith("5+")) {
-          setStep("group_size_custom");
-          setMessage({ text: "How many people, exactly?" });
+          setStep("adults_count_custom");
+          setMessage({ text: "How many adults, exactly?" });
           return;
         }
-        const n = parseInt(option, 10);
-        proceedAfterGroupSize(n);
+        proceedAfterAdults(parseInt(option, 10));
+        return;
+      }
+      case "kids_count": {
+        if (option.startsWith("5+")) {
+          setStep("kids_count_custom");
+          setMessage({ text: "How many children, exactly?" });
+          return;
+        }
+        proceedAfterKids(parseInt(option, 10) || 0);
         return;
       }
       case "swim_all": {
         if (option === "Yes") {
-          go("kids_count", { nonSwimmers: 0 }, askKids(form.totalPeople));
+          startCourseLoop(form.adults, { nonSwimmers: 0 });
+        } else if (form.adults === 1) {
+          startCourseLoop(0, { nonSwimmers: 1 });
         } else {
-          const total = form.totalPeople;
-          const opts = Array.from({ length: total }, (_, i) => String(i + 1));
-          go("non_swimmer_count", {}, { text: `How many of the ${total} are non-swimmers? (they'll get a Private Lesson)`, options: [...opts, "← Back"] });
+          const opts = Array.from({ length: form.adults }, (_, i) => String(i + 1));
+          go("non_swimmer_count", {}, { text: `How many of the ${form.adults} adults are non-swimmers? (they'll get a Private Lesson)`, options: [...opts, "← Back"] });
         }
         return;
       }
       case "non_swimmer_count": {
         const n = parseInt(option, 10);
-        go("kids_count", { nonSwimmers: n }, askKids(form.totalPeople));
-        return;
-      }
-      case "kids_count": {
-        const kids = parseInt(option, 10) || 0;
-        const swimmers = Math.max(0, form.totalPeople - kids - form.nonSwimmers);
-        if (swimmers > 0) {
-          go("course_type", { kids }, { text: "Which course would you like?", options: [...swimmerCourses.map((c) => `${c.name} - ${c.price.toLocaleString()} Rs/person`), "← Back"] });
-        } else {
-          proceedAfterCourse({ kids });
-        }
+        startCourseLoop(Math.max(0, form.adults - n), { nonSwimmers: n });
         return;
       }
       case "course_type": {
         const course = swimmerCourses.find((c) => option.startsWith(c.name));
-        proceedAfterCourse({ courseType: course?.type ?? "teaser" });
+        const newTypes = [...form.swimmerCourseTypes, course?.type ?? "teaser"];
+        const swimmersTotal = form.adults - form.nonSwimmers;
+        const nextIndex = form.courseIndex + 1;
+        if (nextIndex < swimmersTotal) {
+          go("course_type", { swimmerCourseTypes: newTypes, courseIndex: nextIndex }, { text: `Which course for surfer ${nextIndex + 1} of ${swimmersTotal}?`, options: [...swimmerCourses.map((c) => `${c.name} - ${c.price.toLocaleString()} Rs/person`), "← Back"] });
+        } else {
+          afterAllCourses({ swimmerCourseTypes: newTypes });
+        }
+        return;
+      }
+      case "board_upsell": {
+        if (option === "Yes") {
+          go("board_type", { wantsBoard: true }, { text: "Which board would you like to rent?", options: [...boardOptionNames, "← Back"] });
+        } else {
+          go("date_selection", { wantsBoard: false }, { text: "Now, pick a date for your lesson." });
+        }
         return;
       }
       case "board_type": {
@@ -388,14 +442,13 @@ export default function BookingPage() {
           setMessage({ text: "How many boards, exactly?" });
           return;
         }
-        const n = parseInt(option, 10);
-        go("board_pricing", { boardQuantity: n }, { text: "How would you like to pay for the rental?", options: ["By the hour", "Full day", "← Back"] });
+        go("board_pricing", { boardQuantity: parseInt(option, 10) }, { text: "How would you like to pay for the rental?", options: ["By the hour", "Full day", "← Back"] });
         return;
       }
       case "board_pricing": {
         const pricing = option === "Full day" ? "day" : "hourly";
         if (pricing === "day") {
-          proceedAfterBoard({ boardPricing: pricing });
+          go("date_selection", { boardPricing: pricing }, { text: form.wantsSurf ? "Last step: pick a date for the rental." : "Pick a date for the rental." });
         } else {
           const times = settings ? pickupTimes(settings) : [];
           go("board_start", { boardPricing: pricing }, { text: "What time would you like to pick up the board?", options: [...times, "← Back"] });
@@ -409,8 +462,7 @@ export default function BookingPage() {
         return;
       }
       case "board_hours": {
-        const hours = parseInt(option, 10) || 1;
-        proceedAfterBoard({ boardHours: hours });
+        go("date_selection", { boardHours: parseInt(option, 10) || 1 }, { text: form.wantsSurf ? "Last step: pick a date for the rental." : "Pick a date for the rental." });
         return;
       }
       case "time_selection": {
@@ -429,38 +481,17 @@ export default function BookingPage() {
     }
   }
 
-  function askKids(total: number): BotMessage {
-    const opts = Array.from({ length: total + 1 }, (_, i) => String(i));
-    return { text: `How many of the ${total} are children (Kids Lesson)?`, options: [...opts, "← Back"] };
-  }
-
-  function proceedAfterGroupSize(n: number) {
-    const total = Math.max(1, n);
-    if (total > 1) {
-      go("swim_all", { totalPeople: total }, { text: `Are all ${total} people swimmers?`, options: ["Yes", "No", "← Back"] });
-    } else {
-      go("swim_all", { totalPeople: total }, { text: "Are you a swimmer?", options: ["Yes", "No", "← Back"] });
-    }
-  }
-
-  function proceedAfterCourse(patch: Partial<FormData>) {
-    if (form.wantsBoard) {
-      go("board_type", patch, { text: "Would you like to rent a board too? Which one?", options: [...boardOptionNames, "← Back"] });
-    } else {
-      go("date_selection", patch, { text: "Now, pick a date for your lesson." });
-    }
-  }
-
-  function proceedAfterBoard(patch: Partial<FormData>) {
-    go("date_selection", patch, { text: form.wantsSurf ? "Last step: pick a date for the rental." : "Pick a date for the rental." });
-  }
-
   function handleSend() {
     const value = inputValue.trim();
     setInputValue("");
-    if (step === "group_size_custom") {
-      const n = Math.min(30, Math.max(1, parseInt(value, 10) || 1));
-      return proceedAfterGroupSize(n);
+    if (step === "adults_count_custom") {
+      return proceedAfterAdults(Math.min(30, Math.max(0, parseInt(value, 10) || 0)));
+    }
+    if (step === "kids_count_custom") {
+      return proceedAfterKids(Math.min(30, Math.max(0, parseInt(value, 10) || 0)));
+    }
+    if (step === "kids_ages") {
+      return startSwimStage({ kidsAges: value });
     }
     if (step === "board_quantity_custom") {
       const n = Math.min(10, Math.max(1, parseInt(value, 10) || 1));
@@ -502,32 +533,13 @@ export default function BookingPage() {
 
   return (
     <div className="min-h-screen bg-surface font-sans2 text-slate">
-      {/* ── Bento header ───────────────────────────────────────────────── */}
+      {/* ── Header ─────────────────────────────────────────────────────── */}
       <div className="border-b border-line2 bg-surface">
-        <div className="mx-auto max-w-5xl px-5 py-10 md:py-14">
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
-            <div className="flex flex-col justify-between rounded-tl-[28px] rounded-br-[28px] border border-line2 bg-white p-6 md:col-span-7 md:p-9">
-              <span className="font-mono2 text-[11px] uppercase tracking-[0.2em] text-slate-soft">Goa · India</span>
-              <h1 className="mt-5 font-heading text-4xl font-bold leading-[1.05] tracking-tight text-slate md:text-5xl">LazyDog Surf</h1>
-              <p className="mt-3 max-w-sm text-sm leading-relaxed text-slate-soft">Surf lessons and board rental, booked in a couple of minutes.</p>
-            </div>
-            <div className="grid grid-cols-2 gap-3 md:col-span-5">
-              <div className="group rounded-2xl border border-line2 bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent">
-                <p className="font-mono2 text-[10px] uppercase tracking-widest text-slate-soft">Capacity</p>
-                <p className="mt-2 font-heading text-2xl font-bold text-slate">8<span className="font-mono2 text-xs font-normal text-slate-soft">/day</span></p>
-              </div>
-              <div className="group rounded-2xl border border-line2 bg-white p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent">
-                <p className="font-mono2 text-[10px] uppercase tracking-widest text-slate-soft">Instructor</p>
-                <p className="mt-2 font-heading text-2xl font-bold text-slate">1<span className="font-mono2 text-xs font-normal text-slate-soft"> on site</span></p>
-              </div>
-              <div className="col-span-2 flex items-center justify-between rounded-2xl border border-slate bg-slate p-4 transition-all duration-200 hover:-translate-y-0.5">
-                <div>
-                  <p className="font-mono2 text-[10px] uppercase tracking-widest text-white/50">Also available</p>
-                  <p className="mt-1 font-heading text-lg font-semibold text-white">Board rental</p>
-                </div>
-                <span className="font-mono2 text-xl text-accent">→</span>
-              </div>
-            </div>
+        <div className="mx-auto max-w-2xl px-5 py-10 md:py-14">
+          <div className="flex flex-col justify-between rounded-tl-[28px] rounded-br-[28px] border border-line2 bg-white p-6 md:p-9">
+            <span className="font-mono2 text-[11px] uppercase tracking-[0.2em] text-slate-soft">Goa · India</span>
+            <h1 className="mt-5 font-heading text-4xl font-bold leading-[1.05] tracking-tight text-slate md:text-5xl">LazyDog Surf</h1>
+            <p className="mt-3 max-w-sm text-sm leading-relaxed text-slate-soft">Surf lessons and board rental, booked in a couple of minutes.</p>
           </div>
         </div>
       </div>
@@ -621,11 +633,13 @@ export default function BookingPage() {
                         );
                       })}
                     </div>
-                    <div className="flex flex-wrap gap-4 pt-1 font-mono2 text-[10px] uppercase tracking-wide text-slate-soft">
-                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-accent" /> Today</span>
-                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-line2" /> Available</span>
-                      <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-surface2" /> Full</span>
-                    </div>
+                    {form.wantsSurf && (
+                      <div className="flex flex-wrap gap-4 pt-1 font-mono2 text-[10px] uppercase tracking-wide text-slate-soft">
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-accent" /> Today</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-line2" /> Available</span>
+                        <span className="flex items-center gap-1.5"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-surface2" /> Full</span>
+                      </div>
+                    )}
                     <button onClick={goBack} className="font-mono2 text-xs font-semibold uppercase tracking-widest text-slate-soft transition-colors hover:text-accent">← Back</button>
                   </div>
                 )}
@@ -671,6 +685,7 @@ export default function BookingPage() {
                       step === "contact_phone" ? "Phone / WhatsApp number..." :
                       step === "contact_email" ? "Email address..." :
                       step === "special_requests" ? "Anything we should know..." :
+                      step === "kids_ages" ? "e.g. 6, 9" :
                       "Type a number..."
                     }
                     disabled={submitting}
@@ -690,10 +705,6 @@ export default function BookingPage() {
             {errorMsg && <p className="mx-6 mb-6 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-600">{errorMsg}</p>}
           </div>
         )}
-
-        <p className="text-center font-mono2 text-xs uppercase tracking-widest text-slate-soft">
-          <a href="/admin" className="underline-offset-2 hover:text-accent hover:underline">Admin</a>
-        </p>
       </div>
     </div>
   );

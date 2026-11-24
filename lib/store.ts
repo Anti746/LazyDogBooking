@@ -23,10 +23,10 @@ export interface Db {
 }
 
 const DEFAULT_COURSES: Course[] = [
-  { id: "teaser", name: "Taster Lesson", type: "teaser", duration: "1.5h", price: 1500, days: 1, is_active: true, sort_order: 1 },
-  { id: "plunge", name: "3 Day Course", type: "plunge", duration: "3 lessons × 1.5h", price: 4000, days: 3, is_active: true, sort_order: 2 },
-  { id: "immerse", name: "5 Day Course", type: "immerse", duration: "5 lessons × 1.5h", price: 6000, days: 5, is_active: true, sort_order: 3 },
-  { id: "week", name: "7 Day Course", type: "week", duration: "7 lessons × 1.5h", price: 8000, days: 7, is_active: true, sort_order: 4 },
+  { id: "teaser", name: "1 Day", type: "teaser", duration: "1.5h", price: 1500, days: 1, is_active: true, sort_order: 1 },
+  { id: "plunge", name: "3 Day", type: "plunge", duration: "3 lessons × 1.5h", price: 4000, days: 3, is_active: true, sort_order: 2 },
+  { id: "immerse", name: "5 Day", type: "immerse", duration: "5 lessons × 1.5h", price: 6000, days: 5, is_active: true, sort_order: 3 },
+  { id: "week", name: "7 Day", type: "week", duration: "7 lessons × 1.5h", price: 8000, days: 7, is_active: true, sort_order: 4 },
   { id: "kids", name: "Kids Lesson", type: "kids", duration: "1.5h", price: 1200, days: 1, is_active: true, sort_order: 5 },
   { id: "private", name: "Private Lesson", type: "private", duration: "1.5h", price: 2500, days: 1, is_active: true, sort_order: 6 },
 ];

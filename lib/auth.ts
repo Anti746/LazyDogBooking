@@ -4,7 +4,7 @@
 const COOKIE = "lazydog_admin";
 
 function adminPassword(): string {
-  return process.env.ADMIN_PASSWORD || "lazydog";
+  return process.env.ADMIN_PASSWORD || "0000";
 }
 
 function readCookie(header: string, name: string): string | null {
