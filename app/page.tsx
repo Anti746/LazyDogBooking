@@ -7,10 +7,14 @@ import type { BoardType, RentalSettings } from "@/lib/board-rental";
 import type { Course, CourseType } from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
-// One consolidated booking form (not a one-question-at-a-time wizard): every
-// detail — group size, swimming ability, course per surfer, board rental,
-// date & time — lives on a single screen with dropdowns. "Continue" moves to
-// a second screen for contact details + confirmation.
+// Three screens, one card:
+//   1) type   — Surf Lesson or Board Rental (nothing else on this screen)
+//   2) details — every follow-up question for that choice, one page, dropdowns
+//   3) contact — name / phone / email / notes + summary + confirm
+//
+// Pricing rule: a child under 12 is priced as a Kids Lesson; a child 12 or
+// older books like an adult — picks their own course and counts toward the
+// 3+ group discount headcount, same as the original Surf Wala project.
 //
 // Visual language: organic modernism / tactile editorial — warm off-white
 // base, near-black ink, a single signal-orange accent reserved for primary
@@ -18,7 +22,7 @@ import type { Course, CourseType } from "@/lib/types";
 // Grotesk for display type, JetBrains Mono for numbers/labels/statuses.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Stage = "details" | "contact" | "completed";
+type Stage = "type" | "details" | "contact" | "completed";
 type BookingType = "surf" | "board";
 
 interface DayInfo {
@@ -29,6 +33,8 @@ interface DayInfo {
 
 const TIME_SLOTS = ["08:00", "10:00"];
 const COUNT_OPTIONS = Array.from({ length: 11 }, (_, i) => i); // 0..10
+const AGE_OPTIONS = Array.from({ length: 18 }, (_, i) => i); // 0..17
+const KID_AGE_CUTOFF = 12; // under this age: Kids Lesson. At/above: books like an adult.
 
 function todayStr(offset = 0): string {
   const d = new Date();
@@ -47,7 +53,7 @@ export default function BookingPage() {
     fetch("/api/settings").then((r) => r.json()).then(setSettings);
   }, []);
 
-  const [stage, setStage] = useState<Stage>("details");
+  const [stage, setStage] = useState<Stage>("type");
 
   const [bookingType, setBookingType] = useState<BookingType>("surf");
   const [addBoard, setAddBoard] = useState(false);
@@ -55,8 +61,8 @@ export default function BookingPage() {
   const wantsBoard = bookingType === "board" || (bookingType === "surf" && addBoard);
 
   const [adults, setAdults] = useState(1);
-  const [kids, setKids] = useState(0);
-  const [kidsAges, setKidsAges] = useState("");
+  const [kidsCount, setKidsCount] = useState(0);
+  const [kidsAges, setKidsAges] = useState<number[]>([]);
   const [allSwimmers, setAllSwimmers] = useState<"" | "yes" | "no">("");
   const [nonSwimmers, setNonSwimmers] = useState(0);
   const [swimmerCourseTypes, setSwimmerCourseTypes] = useState<CourseType[]>([]);
@@ -83,8 +89,8 @@ export default function BookingPage() {
   const [loadingCalendar, setLoadingCalendar] = useState(false);
   const [dayInfo, setDayInfo] = useState<Record<string, DayInfo>>({});
 
-  // ── Defaults once data loads ─────────────────────────────────────────────
   const swimmerCourses = courses.filter((c) => c.type !== "kids" && c.type !== "private");
+
   useEffect(() => {
     if (boardTypes.length && !boardType) setBoardType(boardTypes[0].key);
   }, [boardTypes, boardType]);
@@ -92,8 +98,20 @@ export default function BookingPage() {
     if (settings && !boardStart) setBoardStart(pickupTimes(settings)[0] ?? "09:00");
   }, [settings, boardStart]);
 
+  // Keep one age field per child, in sync with the child-count dropdown.
+  useEffect(() => {
+    setKidsAges((prev) => {
+      const next = prev.slice(0, kidsCount);
+      while (next.length < kidsCount) next.push(8);
+      return next;
+    });
+  }, [kidsCount]);
+
+  const kidsUnder12 = kidsAges.filter((a) => a < KID_AGE_CUTOFF).length;
+  const kids12Plus = kidsAges.filter((a) => a >= KID_AGE_CUTOFF).length;
   const effectiveNonSwimmers = allSwimmers === "no" ? nonSwimmers : 0;
-  const swimmersCount = Math.max(0, adults - effectiveNonSwimmers);
+  // Kids 12+ book like adults — they join the swimmer/course pool.
+  const swimmersCount = Math.max(0, adults - effectiveNonSwimmers) + kids12Plus;
 
   // Keep the per-surfer course list in sync with the swimmer count.
   useEffect(() => {
@@ -160,19 +178,19 @@ export default function BookingPage() {
   }
 
   // ── Price summary ────────────────────────────────────────────────────────
-  const totalPeople = adults + kids;
+  const totalPeople = adults + kidsCount;
   const price = useMemo(() => {
     if (!courses.length || !wantsSurf) return null;
     return calcSurfLessonsPrice(
       {
         numberOfPeople: Math.max(1, totalPeople),
-        numberOfKids: kids,
+        numberOfKids: kidsUnder12,
         numberOfNonSwimmers: effectiveNonSwimmers,
         swimmerCourseTypes,
       },
       courses,
     );
-  }, [courses, wantsSurf, totalPeople, kids, effectiveNonSwimmers, swimmerCourseTypes]);
+  }, [courses, wantsSurf, totalPeople, kidsUnder12, effectiveNonSwimmers, swimmerCourseTypes]);
 
   const boardTypeObj = boardTypes.find((t) => t.key === boardType);
   const boardPrice = wantsBoard && boardTypeObj
@@ -193,7 +211,7 @@ export default function BookingPage() {
       price.lines.forEach((l) => {
         lines.push(`${l.people}x ${l.courseName} — ${l.amount.toLocaleString()} Rs${l.discount > 0 ? ` (-${l.discount.toLocaleString()} group discount)` : ""}`);
       });
-      if (kids > 0 && kidsAges) lines.push(`Children's ages: ${kidsAges}`);
+      if (kidsAges.length) lines.push(`Children's ages: ${kidsAges.join(", ")}`);
       lines.push(`Lesson: ${date} at ${time}`);
     }
     if (wantsBoard && boardTypeObj) {
@@ -208,7 +226,7 @@ export default function BookingPage() {
     setSubmitting(true);
     setErrorMsg(null);
     try {
-      const notesParts = [notes, kids > 0 && kidsAges ? `Children's ages: ${kidsAges}` : ""].filter(Boolean);
+      const notesParts = [notes, kidsAges.length ? `Children's ages: ${kidsAges.join(", ")}` : ""].filter(Boolean);
       const res = await fetch("/api/reservations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -217,7 +235,7 @@ export default function BookingPage() {
           course_date: date,
           course_time: time,
           number_of_people: wantsSurf ? Math.max(1, totalPeople) : 1,
-          number_of_kids: wantsSurf ? kids : 0,
+          number_of_kids: wantsSurf ? kidsUnder12 : 0,
           number_of_non_swimmers: wantsSurf ? effectiveNonSwimmers : 0,
           swimmer_course_types: swimmerCourseTypes,
           special_requests: notesParts.join(" | "),
@@ -242,16 +260,18 @@ export default function BookingPage() {
 
   function resetAll() {
     setBookingType("surf"); setAddBoard(false);
-    setAdults(1); setKids(0); setKidsAges(""); setAllSwimmers(""); setNonSwimmers(0); setSwimmerCourseTypes([]);
+    setAdults(1); setKidsCount(0); setKidsAges([]); setAllSwimmers(""); setNonSwimmers(0); setSwimmerCourseTypes([]);
     setBoardType(boardTypes[0]?.key ?? ""); setBoardQuantity(1); setBoardPricing("hourly"); setBoardStart(""); setBoardHours(2);
     setDate(""); setTime(TIME_SLOTS[0]);
     setName(""); setPhone(""); setEmail(""); setNotes("");
     setConfirmation(null); setErrorMsg(null);
-    setStage("details");
+    setStage("type");
   }
 
   const selectCls = "w-full rounded-md border border-line2 bg-white px-3 py-2 text-sm text-slate outline-none transition-colors focus:border-accent";
   const labelCls = "mb-1.5 block font-mono2 text-[10px] font-semibold uppercase tracking-widest text-slate-soft";
+
+  const stageLabel = stage === "type" ? "Choose service" : stage === "details" ? "Booking" : stage === "contact" ? "Your details" : "Done";
 
   return (
     <div className="min-h-screen bg-surface font-sans2 text-slate">
@@ -263,12 +283,28 @@ export default function BookingPage() {
               <h1 className="font-heading text-2xl font-bold leading-none tracking-tight text-slate">LazyDog Surf</h1>
               <p className="mt-1 font-mono2 text-[10px] uppercase tracking-[0.2em] text-slate-soft">Goa · India</p>
             </div>
-            <span className="font-mono2 text-[11px] uppercase tracking-widest text-slate-soft">
-              {stage === "details" ? "Booking" : stage === "contact" ? "Your details" : "Done"}
-            </span>
+            <span className="font-mono2 text-[11px] uppercase tracking-widest text-slate-soft">{stageLabel}</span>
           </div>
 
-          {stage === "completed" ? (
+          {stage === "type" && (
+            <div className="space-y-4 p-6">
+              <p className="font-heading text-xl font-semibold leading-snug text-slate">What would you like to book?</p>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {(["surf", "board"] as BookingType[]).map((t) => (
+                  <button
+                    key={t}
+                    onClick={() => { setBookingType(t); setStage("details"); }}
+                    className="rounded-xl border border-line2 px-5 py-6 text-left transition-all duration-150 hover:-translate-y-0.5 hover:border-accent"
+                  >
+                    <span className="font-heading text-lg font-bold text-slate">{t === "surf" ? "Surf Lesson" : "Board Rental"}</span>
+                    <p className="mt-1 text-sm text-slate-soft">{t === "surf" ? "Group or private lessons, all levels." : "Soft top, hard top or boogie — by the hour or the day."}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {stage === "completed" && (
             <div className="space-y-4 px-8 py-14 text-center">
               <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-accent-ink">
                 <span className="font-heading text-2xl font-bold text-accent">✓</span>
@@ -286,26 +322,10 @@ export default function BookingPage() {
                 Make Another Booking
               </button>
             </div>
-          ) : stage === "details" ? (
-            <div className="space-y-7 p-6">
-              {/* Booking type */}
-              <div>
-                <span className={labelCls}>What would you like to book?</span>
-                <div className="flex gap-2">
-                  {(["surf", "board"] as BookingType[]).map((t) => (
-                    <button
-                      key={t}
-                      onClick={() => setBookingType(t)}
-                      className={`flex-1 rounded-md border px-4 py-2.5 text-sm font-semibold transition-all duration-150 ${
-                        bookingType === t ? "border-accent bg-accent text-white" : "border-line2 text-slate hover:border-accent hover:text-accent"
-                      }`}
-                    >
-                      {t === "surf" ? "Surf Lesson" : "Board Rental"}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          )}
 
+          {stage === "details" && (
+            <div className="space-y-7 p-6">
               {wantsSurf && (
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -316,17 +336,26 @@ export default function BookingPage() {
                   </div>
                   <div>
                     <span className={labelCls}>Children</span>
-                    <select className={selectCls} value={kids} onChange={(e) => setKids(Number(e.target.value))}>
+                    <select className={selectCls} value={kidsCount} onChange={(e) => setKidsCount(Number(e.target.value))}>
                       {COUNT_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
                     </select>
                   </div>
                 </div>
               )}
 
-              {wantsSurf && kids > 0 && (
+              {wantsSurf && kidsCount > 0 && (
                 <div>
-                  <span className={labelCls}>Children's ages</span>
-                  <input className={selectCls} placeholder="e.g. 6, 9" value={kidsAges} onChange={(e) => setKidsAges(e.target.value)} />
+                  <span className={labelCls}>Each child's age (under {KID_AGE_CUTOFF} books a Kids Lesson · {KID_AGE_CUTOFF}+ picks a course like an adult)</span>
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {kidsAges.map((age, i) => (
+                      <div key={i}>
+                        <span className="mb-1 block font-mono2 text-[10px] text-slate-soft">Child {i + 1}</span>
+                        <select className={selectCls} value={age} onChange={(e) => setKidsAges((prev) => prev.map((a, j) => j === i ? Number(e.target.value) : a))}>
+                          {AGE_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                        </select>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
@@ -360,7 +389,7 @@ export default function BookingPage() {
 
               {wantsSurf && swimmersCount > 0 && (
                 <div className="space-y-3">
-                  <span className={labelCls}>Course {swimmersCount > 1 ? "per surfer" : ""}</span>
+                  <span className={labelCls}>Course {swimmersCount > 1 ? "per surfer" : ""}{kids12Plus > 0 ? " (incl. children 12+)" : ""}</span>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     {Array.from({ length: swimmersCount }).map((_, i) => (
                       <div key={i}>
@@ -497,16 +526,23 @@ export default function BookingPage() {
                 </p>
               )}
 
-              <button
-                onClick={() => setStage("contact")}
-                disabled={!detailsReady}
-                className="w-full rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Continue
-              </button>
+              <div className="flex gap-2">
+                <button onClick={() => setStage("type")} className="rounded-md border border-line2 px-4 py-3 text-sm font-semibold text-slate-soft transition-all duration-150 hover:-translate-y-0.5 hover:border-slate-soft hover:text-slate">
+                  ← Back
+                </button>
+                <button
+                  onClick={() => setStage("contact")}
+                  disabled={!detailsReady}
+                  className="flex-1 rounded-md bg-accent px-5 py-3 text-sm font-semibold text-white transition-all duration-150 hover:-translate-y-0.5 hover:bg-slate disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Continue
+                </button>
+              </div>
               {!detailsReady && <p className="text-center text-xs text-slate-soft">Pick a date{wantsSurf && adults > 0 && allSwimmers === "" ? " and answer the swimmer question" : ""} to continue.</p>}
             </div>
-          ) : (
+          )}
+
+          {stage === "contact" && (
             <div className="space-y-5 p-6">
               <div className="space-y-4">
                 <div>
