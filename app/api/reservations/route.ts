@@ -18,19 +18,19 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as CreateBookingRequest | null;
   if (!body || !body.customer?.first_name || !body.customer?.phone) {
-    return NextResponse.json({ error: "Meno a telefón sú povinné." }, { status: 400 });
+    return NextResponse.json({ error: "Name and phone are required." }, { status: 400 });
   }
   if (!body.course_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.course_date)) {
-    return NextResponse.json({ error: "Neplatný dátum." }, { status: 400 });
+    return NextResponse.json({ error: "Invalid date." }, { status: 400 });
   }
   if (body.course_date <= todayLocal()) {
-    return NextResponse.json({ error: "Termín lekcie musí byť aspoň zajtra." }, { status: 400 });
+    return NextResponse.json({ error: "The lesson date must be at least tomorrow." }, { status: 400 });
   }
   const totalPeople = Math.max(1, Math.round(body.number_of_people || 1));
-  if (totalPeople > 30) return NextResponse.json({ error: "Príliš veľká skupina." }, { status: 400 });
+  if (totalPeople > 30) return NextResponse.json({ error: "Group is too large." }, { status: 400 });
   const kids = Math.max(0, Math.round(body.number_of_kids || 0));
   const nonSwimmers = Math.max(0, Math.round(body.number_of_non_swimmers || 0));
-  if (kids + nonSwimmers > totalPeople) return NextResponse.json({ error: "Počty osôb nesedia." }, { status: 400 });
+  if (kids + nonSwimmers > totalPeople) return NextResponse.json({ error: "The headcounts don't add up." }, { status: 400 });
   const swimmerTypes = (Array.isArray(body.swimmer_course_types) ? body.swimmer_course_types : []).filter((t): t is CourseType => COURSE_TYPES.includes(t));
 
   try {
@@ -127,15 +127,15 @@ export async function POST(request: Request) {
     const message = err instanceof Error ? err.message : "Server error";
     if (message.startsWith("CAPACITY:")) {
       const [, free, cap] = message.split(":");
-      return NextResponse.json({ error: `Na tento deň je voľných už len ${free} miest (max. ${cap}/deň).`, freeSlots: Number(free) }, { status: 409 });
+      return NextResponse.json({ error: `Only ${free} spot(s) left for this day (max ${cap}/day).`, freeSlots: Number(free) }, { status: 409 });
     }
     if (message.startsWith("BOARDS:")) {
       const free = message.split(":")[1];
-      return NextResponse.json({ error: `Na tento deň je dostupných už len ${free} ks tohto typu dosky.` }, { status: 409 });
+      return NextResponse.json({ error: `Only ${free} board(s) of this type left for this day.` }, { status: 409 });
     }
-    if (message === "NOPRICE") return NextResponse.json({ error: "Nepodarilo sa vypočítať cenu — skontrolujte výber lekcie." }, { status: 400 });
-    if (message === "BOARDTYPE") return NextResponse.json({ error: "Neplatný typ dosky." }, { status: 400 });
+    if (message === "NOPRICE") return NextResponse.json({ error: "Could not calculate the price — check the lesson selection." }, { status: 400 });
+    if (message === "BOARDTYPE") return NextResponse.json({ error: "Invalid board type." }, { status: 400 });
     console.error("RESERVATION CREATE ERROR:", err);
-    return NextResponse.json({ error: "Nastala chyba na serveri." }, { status: 500 });
+    return NextResponse.json({ error: "A server error occurred." }, { status: 500 });
   }
 }

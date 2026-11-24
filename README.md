@@ -1,47 +1,46 @@
-# Lazy Dog Surf — mini rezervačný systém
+# LazyDog Surf — mini booking system
 
-Zjednodušená verzia Surf Wala projektu — len surfové lekcie + požičanie dosiek,
-bez ubytovania. Postavené na Next.js, dáta sa ukladajú do `data/db.json`
-(žiadna databáza netreba nastavovať).
+A simplified version of the Surf Wala project — surf lessons + board rental
+only, no accommodation. Built on Next.js, data is stored in `data/db.json`
+(no database setup needed).
 
-## Spustenie
+## Running it
 
 ```bash
 npm install
 npm run dev
 ```
 
-Otvorí sa na http://localhost:3000
+Opens at http://localhost:3000
 
-- **Zákaznícka rezervačná stránka**: `/`
-- **Admin dashboard**: `/admin` (heslo `lazydog`, dá sa zmeniť cez `ADMIN_PASSWORD` v `.env.local`)
+- **Customer booking page**: `/`
+- **Admin dashboard**: `/admin` (password `lazydog`, changeable via `ADMIN_PASSWORD` in `.env.local`)
 
-## Čo je zachované z pôvodného projektu
+## What's kept from the original project
 
-- **Cenová logika lekcií** (`lib/pricing.ts`) — presne tá istá logika ako v Surf
-  Wala (`lib/surf-pricing.ts`): každý plavec si môže vybrať iný kurz, neplavci
-  idú automaticky na Súkromnú lekciu, deti sa platia na lekciu, skupinová
-  zľava 10 % pri 3+ dospelých. (Sezónne "Peak Holiday" obdobie z ubytovania
-  bolo vynechané, keďže Lazy Dog ubytovanie nemá.)
-- **Logika požičiavania dosiek** (`lib/board-rental.ts`) — prenesená 1:1:
-  cena na hodinu vs. na deň (nikdy viac ako celodenná cena), dostupnosť podľa
-  počtu kusov, časy vyzdvihnutia.
+- **Lesson pricing logic** (`lib/pricing.ts`) — the exact same logic as Surf
+  Wala (`lib/surf-pricing.ts`): each swimmer can pick a different course,
+  non-swimmers automatically go to a Private Lesson, kids are priced per
+  lesson, 10% group discount for 3+ adults. (The seasonal "Peak Holiday"
+  accommodation pricing was dropped, since LazyDog Surf has no accommodation.)
+- **Board rental logic** (`lib/board-rental.ts`) — ported 1:1: hourly vs. day
+  pricing (never more than the day price), availability by quantity, pickup
+  time windows.
 
-## Čo je zjednodušené oproti pôvodnému projektu
+## What's simplified compared to the original project
 
-- Žiadne ubytovanie, housekeeping, izby.
-- Žiadne priraďovanie viacerých inštruktorov — len jeden inštruktor, preto
-  jednoduchý denný limit (predvolene **8 žiakov/deň**, upraviteľný v
-  Nastaveniach).
-- Jedno jednoduché admin heslo namiesto systému rolí.
-- Žiadne emaily / Google Calendar synchronizácia.
-- Dáta v JSON súbore namiesto Supabase (ľahké na spustenie; pri väčšom
-  prevádzke sa dá neskôr nahradiť reálnou databázou).
+- No accommodation, housekeeping, or rooms.
+- No assigning multiple instructors — just one instructor, so a simple daily
+  cap (default **8 students/day**, editable in Settings).
+- One simple admin password instead of a role system.
+- No emails / Google Calendar sync.
+- Data in a JSON file instead of Supabase (easy to run; can be swapped for a
+  real database later if it grows).
 
 ## Admin dashboard
 
-- **Kalendár** (`/admin/calendar`) — mesačný prehľad, pri každom dni badge
-  `x/8`, kliknutím na deň sa zobrazí zoznam rezervácií a požičaní dosiek s
-  možnosťou potvrdiť/zrušiť.
-- **Nastavenia** (`/admin/settings`) — úprava cien lekcií, cien a počtu
-  dosiek, denného limitu žiakov a časov požičiavania.
+- **Calendar** (`/admin/calendar`) — monthly view, each day shows an `x/8`
+  badge; clicking a day shows that day's bookings and board rentals with
+  confirm/cancel actions.
+- **Settings** (`/admin/settings`) — edit lesson prices, board prices and
+  quantities, the daily student cap, and rental pickup times.

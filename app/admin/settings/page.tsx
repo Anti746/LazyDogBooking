@@ -30,16 +30,16 @@ export default function SettingsPage() {
 
   async function saveCourses() {
     await fetch("/api/courses", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(courses) });
-    flash("Ceny lekcií uložené ✓");
+    flash("Lesson prices saved ✓");
   }
   async function saveBoards() {
     await fetch("/api/board-types", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boardTypes) });
-    flash("Ceny dosiek uložené ✓");
+    flash("Board prices saved ✓");
   }
   async function saveSettings() {
     if (!settings) return;
     await fetch("/api/settings", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) });
-    flash("Nastavenia uložené ✓");
+    flash("Settings saved ✓");
   }
 
   return (
@@ -47,31 +47,31 @@ export default function SettingsPage() {
       {savedMsg && <div className="rounded-xl bg-sage-soft px-4 py-2 font-semibold text-sage-dark">{savedMsg}</div>}
 
       <section className="rounded-card border border-line bg-paper p-5">
-        <h2 className="mb-4 text-lg font-bold">Kapacita a časy</h2>
+        <h2 className="mb-4 text-lg font-bold">Capacity & Times</h2>
         {settings && (
           <div className="grid grid-cols-3 gap-4">
             <label className="block text-sm">
-              <span className="mb-1 block font-semibold text-ink-soft">Max. žiakov / deň</span>
+              <span className="mb-1 block font-semibold text-ink-soft">Max students / day</span>
               <input type="number" min={1} className="input" value={settings.max_students_per_day}
                 onChange={(e) => setSettings({ ...settings, max_students_per_day: Math.max(1, Number(e.target.value)) })} />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block font-semibold text-ink-soft">Dosky od (vyzdvihnutie)</span>
+              <span className="mb-1 block font-semibold text-ink-soft">Boards from (pickup)</span>
               <input type="time" className="input" value={settings.pickup_from}
                 onChange={(e) => setSettings({ ...settings, pickup_from: e.target.value })} />
             </label>
             <label className="block text-sm">
-              <span className="mb-1 block font-semibold text-ink-soft">Dosky vrátiť do</span>
+              <span className="mb-1 block font-semibold text-ink-soft">Boards back by</span>
               <input type="time" className="input" value={settings.back_by}
                 onChange={(e) => setSettings({ ...settings, back_by: e.target.value })} />
             </label>
           </div>
         )}
-        <button onClick={saveSettings} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Uložiť</button>
+        <button onClick={saveSettings} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Save</button>
       </section>
 
       <section className="rounded-card border border-line bg-paper p-5">
-        <h2 className="mb-4 text-lg font-bold">Ceny lekcií</h2>
+        <h2 className="mb-4 text-lg font-bold">Lesson Prices</h2>
         <div className="space-y-2">
           {courses.map((c, i) => (
             <div key={c.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3">
@@ -85,16 +85,16 @@ export default function SettingsPage() {
               <label className="flex items-center gap-1 text-sm">
                 <input type="checkbox" checked={c.is_active}
                   onChange={(e) => setCourses((prev) => prev.map((x, j) => j === i ? { ...x, is_active: e.target.checked } : x))} />
-                aktívne
+                active
               </label>
             </div>
           ))}
         </div>
-        <button onClick={saveCourses} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Uložiť</button>
+        <button onClick={saveCourses} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Save</button>
       </section>
 
       <section className="rounded-card border border-line bg-paper p-5">
-        <h2 className="mb-4 text-lg font-bold">Ceny a počty dosiek</h2>
+        <h2 className="mb-4 text-lg font-bold">Board Prices & Quantities</h2>
         <div className="space-y-2">
           {boardTypes.map((t, i) => (
             <div key={t.key} className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-3">
@@ -108,7 +108,7 @@ export default function SettingsPage() {
               <div className="flex items-center gap-1">
                 <input type="number" min={0} className="input w-24" value={t.day_price}
                   onChange={(e) => setBoardTypes((prev) => prev.map((x, j) => j === i ? { ...x, day_price: Number(e.target.value) } : x))} />
-                <span className="text-xs text-ink-soft">Rs/deň</span>
+                <span className="text-xs text-ink-soft">Rs/day</span>
               </div>
               <div className="flex items-center gap-1">
                 <input type="number" min={0} className="input w-20" value={t.quantity}
@@ -118,7 +118,7 @@ export default function SettingsPage() {
             </div>
           ))}
         </div>
-        <button onClick={saveBoards} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Uložiť</button>
+        <button onClick={saveBoards} className="mt-4 rounded-lg bg-brown px-4 py-2 font-semibold text-white hover:bg-brown-dark">Save</button>
       </section>
     </div>
   );

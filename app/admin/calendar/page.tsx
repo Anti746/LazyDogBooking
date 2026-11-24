@@ -8,7 +8,7 @@ function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-const STATUS_LABEL: Record<ReservationStatus, string> = { pending: "Čaká", confirmed: "Potvrdené", cancelled: "Zrušené" };
+const STATUS_LABEL: Record<ReservationStatus, string> = { pending: "Pending", confirmed: "Confirmed", cancelled: "Cancelled" };
 const STATUS_CLASS: Record<ReservationStatus, string> = {
   pending: "bg-yellow-soft text-ink border-yellow",
   confirmed: "bg-sage-soft text-ink border-sage",
@@ -83,21 +83,21 @@ export default function CalendarPage() {
     <div>
       <div className="mb-5 flex items-center justify-between">
         <h2 className="text-2xl font-bold">
-          {month.toLocaleDateString("sk-SK", { month: "long", year: "numeric" })}
+          {month.toLocaleDateString("en-US", { month: "long", year: "numeric" })}
         </h2>
         <div className="flex gap-2">
           <button onClick={() => setMonth((m) => { const d = new Date(m); d.setMonth(d.getMonth() - 1); return d; })} className="rounded-lg border border-line px-3 py-1.5 hover:bg-paper">←</button>
-          <button onClick={() => { const d = new Date(); d.setDate(1); setMonth(d); }} className="rounded-lg border border-line px-3 py-1.5 hover:bg-paper">Dnes</button>
+          <button onClick={() => { const d = new Date(); d.setDate(1); setMonth(d); }} className="rounded-lg border border-line px-3 py-1.5 hover:bg-paper">Today</button>
           <button onClick={() => setMonth((m) => { const d = new Date(m); d.setMonth(d.getMonth() + 1); return d; })} className="rounded-lg border border-line px-3 py-1.5 hover:bg-paper">→</button>
         </div>
       </div>
 
       {loading ? (
-        <p className="text-ink-soft">Načítavam…</p>
+        <p className="text-ink-soft">Loading…</p>
       ) : (
         <div className="overflow-hidden rounded-card border border-line bg-paper">
           <div className="grid grid-cols-7 border-b border-line bg-sand text-center text-xs font-semibold text-ink-soft">
-            {["Po", "Ut", "St", "Št", "Pi", "So", "Ne"].map((d) => <div key={d} className="py-2">{d}</div>)}
+            {["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => <div key={d} className="py-2">{d}</div>)}
           </div>
           {weeks.map((week, wi) => (
             <div key={wi} className="grid grid-cols-7">
@@ -131,14 +131,14 @@ export default function CalendarPage() {
         <section className="mt-6 rounded-card border border-line bg-paper p-5">
           <div className="mb-4 flex items-center justify-between">
             <h3 className="text-lg font-bold">
-              {new Date(selected + "T00:00:00").toLocaleDateString("sk-SK", { weekday: "long", day: "numeric", month: "long" })}
-              {" · "}{byDate.get(selected) ?? 0}/{cap} miest
+              {new Date(selected + "T00:00:00").toLocaleDateString("en-US", { weekday: "long", day: "numeric", month: "long" })}
+              {" · "}{byDate.get(selected) ?? 0}/{cap} spots
             </h3>
-            <button onClick={() => setSelected(null)} className="text-sm text-ink-soft hover:underline">Zavrieť</button>
+            <button onClick={() => setSelected(null)} className="text-sm text-ink-soft hover:underline">Close</button>
           </div>
 
           {selectedReservations.length === 0 && selectedBoardRentals.length === 0 ? (
-            <p className="text-ink-soft">Na tento deň zatiaľ nie sú žiadne rezervácie.</p>
+            <p className="text-ink-soft">No bookings for this day yet.</p>
           ) : (
             <div className="space-y-3">
               {selectedReservations.map((r) => (
@@ -152,14 +152,14 @@ export default function CalendarPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold">{r.total_price.toLocaleString()} Rs</p>
-                      {r.discount > 0 && <p className="text-xs text-sage-dark">zľava −{r.discount.toLocaleString()} Rs</p>}
+                      {r.discount > 0 && <p className="text-xs text-sage-dark">discount −{r.discount.toLocaleString()} Rs</p>}
                       <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${STATUS_CLASS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                     </div>
                   </div>
                   <div className="mt-3 flex gap-2">
-                    {r.status !== "confirmed" && <button onClick={() => setStatus(r.id, "confirmed")} className="rounded-lg bg-brown px-3 py-1.5 text-sm font-semibold text-white hover:bg-brown-dark">Potvrdiť</button>}
-                    {r.status !== "cancelled" && <button onClick={() => setStatus(r.id, "cancelled")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Zrušiť</button>}
-                    {r.status !== "pending" && <button onClick={() => setStatus(r.id, "pending")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Vrátiť na čakajúce</button>}
+                    {r.status !== "confirmed" && <button onClick={() => setStatus(r.id, "confirmed")} className="rounded-lg bg-brown px-3 py-1.5 text-sm font-semibold text-white hover:bg-brown-dark">Confirm</button>}
+                    {r.status !== "cancelled" && <button onClick={() => setStatus(r.id, "cancelled")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Cancel</button>}
+                    {r.status !== "pending" && <button onClick={() => setStatus(r.id, "pending")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Back to pending</button>}
                   </div>
                 </div>
               ))}
@@ -168,9 +168,9 @@ export default function CalendarPage() {
                 <div key={r.id} className="rounded-xl border border-line bg-sand/50 p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold">🏄 Doska: {r.guest_name} · {r.quantity}× {r.board_type}</p>
+                      <p className="font-semibold">Board: {r.guest_name} · {r.quantity}× {r.board_type}</p>
                       <p className="text-sm text-ink-soft">
-                        {r.pricing === "day" ? "Celý deň" : `${r.planned_hours ?? 1} h od ${r.planned_start ?? "?"}`}
+                        {r.pricing === "day" ? "Full day" : `${r.planned_hours ?? 1} h od ${r.planned_start ?? "?"}`}
                         {r.guest_phone ? ` · ${r.guest_phone}` : ""}
                       </p>
                     </div>
@@ -180,8 +180,8 @@ export default function CalendarPage() {
                     </div>
                   </div>
                   <div className="mt-3 flex gap-2">
-                    {r.status !== "confirmed" && <button onClick={() => setRentalStatus(r.id, "confirmed")} className="rounded-lg bg-brown px-3 py-1.5 text-sm font-semibold text-white hover:bg-brown-dark">Potvrdiť</button>}
-                    {r.status !== "cancelled" && <button onClick={() => setRentalStatus(r.id, "cancelled")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Zrušiť</button>}
+                    {r.status !== "confirmed" && <button onClick={() => setRentalStatus(r.id, "confirmed")} className="rounded-lg bg-brown px-3 py-1.5 text-sm font-semibold text-white hover:bg-brown-dark">Confirm</button>}
+                    {r.status !== "cancelled" && <button onClick={() => setRentalStatus(r.id, "cancelled")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Cancel</button>}
                   </div>
                 </div>
               ))}
