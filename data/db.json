@@ -1,0 +1,18 @@
+{
+  "courses": [
+    { "id": "teaser", "name": "Taster Lesson", "type": "teaser", "duration": "1.5h", "price": 1500, "days": 1, "is_active": true, "sort_order": 1 },
+    { "id": "plunge", "name": "3 Day Course", "type": "plunge", "duration": "3 lessons × 1.5h", "price": 4000, "days": 3, "is_active": true, "sort_order": 2 },
+    { "id": "immerse", "name": "5 Day Course", "type": "immerse", "duration": "5 lessons × 1.5h", "price": 6000, "days": 5, "is_active": true, "sort_order": 3 },
+    { "id": "week", "name": "7 Day Course", "type": "week", "duration": "7 lessons × 1.5h", "price": 8000, "days": 7, "is_active": true, "sort_order": 4 },
+    { "id": "kids", "name": "Kids Lesson", "type": "kids", "duration": "1.5h", "price": 1200, "days": 1, "is_active": true, "sort_order": 5 },
+    { "id": "private", "name": "Private Lesson", "type": "private", "duration": "1.5h", "price": 2500, "days": 1, "is_active": true, "sort_order": 6 }
+  ],
+  "board_types": [
+    { "key": "soft_top", "name": "Soft top", "hourly_price": 600, "day_price": 1500, "quantity": 5, "is_active": true, "sort_order": 1 },
+    { "key": "hard_top", "name": "Hard top", "hourly_price": 700, "day_price": 1500, "quantity": 5, "is_active": true, "sort_order": 2 },
+    { "key": "boogie", "name": "Boogie board", "hourly_price": 300, "day_price": 1000, "quantity": 5, "is_active": true, "sort_order": 3 }
+  ],
+  "settings": { "pickup_from": "07:00", "back_by": "18:30", "max_students_per_day": 8 },
+  "reservations": [],
+  "board_rentals": []
+}
