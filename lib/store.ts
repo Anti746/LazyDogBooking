@@ -1,43 +1,25 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Tiny JSON-file database. No external service to set up — everything lives in
-// data/db.json on disk. Good enough for one small surf school running on one
-// server; swap for a real database later if Lazy Dog outgrows it.
+// Tiny JSON-file database. Everything lives in data/db.json on disk.
 //
 // A simple promise-chain mutex serializes writes so two requests landing at
 // the same moment can't clobber each other.
 // ─────────────────────────────────────────────────────────────────────────────
 import { promises as fs } from "fs";
 import path from "path";
-import type { BoardRental, Course, Reservation } from "@/lib/types";
-import type { BoardType, RentalSettings } from "@/lib/board-rental";
-import { DEFAULT_BOARD_TYPES, DEFAULT_RENTAL_SETTINGS } from "@/lib/board-rental";
+import type { Course, Reservation, Settings } from "@/lib/types";
 
 const DB_PATH = path.join(process.cwd(), "data", "db.json");
 
 export interface Db {
-  courses: Course[];
-  board_types: BoardType[];
-  settings: RentalSettings;
+  course: Course;
+  settings: Settings;
   reservations: Reservation[];
-  board_rentals: BoardRental[];
 }
 
-const DEFAULT_COURSES: Course[] = [
-  { id: "teaser", name: "1 Day", type: "teaser", duration: "1.5h", price: 1500, days: 1, is_active: true, sort_order: 1 },
-  { id: "plunge", name: "3 Day", type: "plunge", duration: "3 lessons × 1.5h", price: 4000, days: 3, is_active: true, sort_order: 2 },
-  { id: "immerse", name: "5 Day", type: "immerse", duration: "5 lessons × 1.5h", price: 6000, days: 5, is_active: true, sort_order: 3 },
-  { id: "week", name: "7 Day", type: "week", duration: "7 lessons × 1.5h", price: 8000, days: 7, is_active: true, sort_order: 4 },
-  { id: "kids", name: "Kids Lesson", type: "kids", duration: "1.5h", price: 1200, days: 1, is_active: true, sort_order: 5 },
-  { id: "private", name: "Private Lesson", type: "private", duration: "1.5h", price: 2500, days: 1, is_active: true, sort_order: 6 },
-];
+export const DEFAULT_COURSE: Course = { id: "one-day", name: "1 Day Surf Course", price: 3000, is_active: true };
+export const DEFAULT_SETTINGS: Settings = { max_students_per_day: 8 };
 
-const DEFAULT_DB: Db = {
-  courses: DEFAULT_COURSES,
-  board_types: DEFAULT_BOARD_TYPES,
-  settings: DEFAULT_RENTAL_SETTINGS,
-  reservations: [],
-  board_rentals: [],
-};
+const DEFAULT_DB: Db = { course: DEFAULT_COURSE, settings: DEFAULT_SETTINGS, reservations: [] };
 
 let writeChain: Promise<void> = Promise.resolve();
 
@@ -53,14 +35,14 @@ async function ensureFile(): Promise<void> {
 export async function readDb(): Promise<Db> {
   await ensureFile();
   const raw = await fs.readFile(DB_PATH, "utf-8");
-  const parsed = JSON.parse(raw) as Partial<Db>;
-  // Fill in anything missing (e.g. a brand new field added later).
+  const parsed = JSON.parse(raw) as Partial<Db> & Record<string, unknown>;
+  // Older files (multi-course + board rental) are migrated on the fly: the old
+  // course list and board data are dropped, and only reservations in the
+  // current shape are kept.
   return {
-    courses: parsed.courses?.length ? parsed.courses : DEFAULT_COURSES,
-    board_types: parsed.board_types?.length ? parsed.board_types : DEFAULT_BOARD_TYPES,
-    settings: { ...DEFAULT_RENTAL_SETTINGS, ...parsed.settings },
-    reservations: parsed.reservations ?? [],
-    board_rentals: parsed.board_rentals ?? [],
+    course: parsed.course && typeof parsed.course === "object" ? { ...DEFAULT_COURSE, ...parsed.course } : DEFAULT_COURSE,
+    settings: { max_students_per_day: (parsed.settings as Settings | undefined)?.max_students_per_day ?? DEFAULT_SETTINGS.max_students_per_day },
+    reservations: (parsed.reservations ?? []).filter((r) => Array.isArray((r as Reservation).participants)),
   };
 }
 
@@ -71,14 +53,16 @@ async function writeDbNow(db: Db): Promise<void> {
 
 /** Read-modify-write under the mutex: avoids two concurrent requests racing. */
 export async function mutateDb<T>(fn: (db: Db) => T | Promise<T>): Promise<T> {
-  let result!: T;
-  writeChain = writeChain.then(async () => {
+  const run = writeChain.then(async () => {
     const db = await readDb();
-    result = await fn(db);
+    const result = await fn(db);
     await writeDbNow(db);
+    return result;
   });
-  await writeChain;
-  return result;
+  // Keep the chain alive even if this step throws, or every later write would
+  // fail with the same error.
+  writeChain = run.then(() => undefined, () => undefined);
+  return run;
 }
 
 export function generateId(prefix = ""): string {

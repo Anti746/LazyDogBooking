@@ -1,21 +1,27 @@
 // ─────────────────────────────────────────────────────────────────────────────
-// Core types for the Lazy Dog mini booking system (surf lessons + board rental
-// only — no accommodation, no multi-instructor assignment).
+// Core types for the LazyDog Surf booking system.
+// One product only: the 1 Day Surf Course, booked per person, with two daily
+// time slots. Every participant gives gender, age, weight and swim ability.
 // ─────────────────────────────────────────────────────────────────────────────
-
-export type CourseType = "teaser" | "plunge" | "immerse" | "week" | "kids" | "private";
 
 export interface Course {
   id: string;
   name: string;
-  type: CourseType;
-  duration: string;
-  /** Price per person (or per lesson, for kids) */
+  /** Price per person, in Rs */
   price: number;
-  /** How many calendar days this course spans (1 for single lessons) */
-  days: number;
   is_active: boolean;
-  sort_order: number;
+}
+
+export type Gender = "male" | "female";
+
+export interface Participant {
+  /** "adult" or "child" — as the booker grouped them on the form */
+  group: "adult" | "child";
+  gender: Gender;
+  age: number;
+  /** Body weight in kg — used to pick the right board size */
+  weight_kg: number;
+  swimmer: boolean;
 }
 
 export interface Customer {
@@ -27,67 +33,37 @@ export interface Customer {
 
 export type ReservationStatus = "pending" | "confirmed" | "cancelled";
 
-/** One course-group within a booking — everyone in it does the same course. */
-export interface ReservationGroup {
-  course_type: CourseType;
-  course_name: string;
-  number_of_people: number;
-  number_of_non_swimmers: number;
-  total_price: number;
-}
-
 export interface Reservation {
   id: string;
   order_ref: string;
   customer: Customer;
   course_date: string; // YYYY-MM-DD
-  course_time: string; // "08:00" | "10:00" | ...
-  groups: ReservationGroup[];
+  course_time: string; // one of TIME_SLOTS
+  course_name: string;
+  price_per_person: number;
+  participants: Participant[];
   number_of_people: number;
-  subtotal: number;
-  discount: number;
   total_price: number;
   special_requests: string | null;
+  /** When the booker ticked the liability waiver, and which version they saw */
+  waiver_accepted_at: string;
+  waiver_version: string;
   status: ReservationStatus;
   created_at: string;
   updated_at: string;
 }
 
-export type RentalPricing = "hourly" | "day";
-export type RentalStatus = "pending" | "confirmed" | "cancelled";
-
-export interface BoardRental {
-  id: string;
-  order_ref: string;
-  guest_name: string;
-  guest_phone: string | null;
-  board_type: string;
-  quantity: number;
-  pricing: RentalPricing;
-  rental_date: string;
-  planned_start: string | null;
-  planned_hours: number | null;
-  amount: number;
-  status: RentalStatus;
-  created_at: string;
+export interface Settings {
+  /** Max students per day (single instructor) */
+  max_students_per_day: number;
 }
 
 export interface CreateBookingRequest {
   customer: Customer;
   course_date: string;
   course_time: string;
-  number_of_people: number;
-  number_of_kids: number;
-  number_of_non_swimmers: number;
-  /** One per swimmer when "different course per person" is used; otherwise one shared type */
-  swimmer_course_types: CourseType[];
-  kids_lesson_counts?: number[];
+  participants: Participant[];
   special_requests?: string;
-  board_rental?: {
-    board_type: string;
-    quantity: number;
-    pricing: RentalPricing;
-    planned_start?: string;
-    planned_hours?: number;
-  } | null;
+  waiver_accepted: boolean;
+  waiver_version: string;
 }

@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
-import { calcSurfLessonsPrice } from "@/lib/pricing";
-import { rentalCharge } from "@/lib/board-rental";
+import { TIME_SLOTS, totalPrice, validateParticipants } from "@/lib/booking";
 import { generateId, mutateDb, readDb, todayLocal } from "@/lib/store";
-import type { BoardRental, CourseType, CreateBookingRequest, Reservation } from "@/lib/types";
-
-const COURSE_TYPES: CourseType[] = ["teaser", "plunge", "immerse", "week", "kids", "private"];
+import { WAIVER_VERSION } from "@/lib/waiver";
+import type { CreateBookingRequest, Participant, Reservation } from "@/lib/types";
 
 // ── GET — admin only: list all bookings ──────────────────────────────────────
 export async function GET(request: Request) {
@@ -14,10 +12,10 @@ export async function GET(request: Request) {
   return NextResponse.json(db.reservations.sort((a, b) => b.created_at.localeCompare(a.created_at)));
 }
 
-// ── POST — public: create a booking (+ optional board rental) ───────────────
+// ── POST — public: create a booking ──────────────────────────────────────────
 export async function POST(request: Request) {
   const body = (await request.json().catch(() => null)) as CreateBookingRequest | null;
-  if (!body || !body.customer?.first_name || !body.customer?.phone) {
+  if (!body || !body.customer?.first_name?.trim() || !body.customer?.phone?.trim()) {
     return NextResponse.json({ error: "Name and phone are required." }, { status: 400 });
   }
   if (!body.course_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.course_date)) {
@@ -26,115 +24,74 @@ export async function POST(request: Request) {
   if (body.course_date <= todayLocal()) {
     return NextResponse.json({ error: "The lesson date must be at least tomorrow." }, { status: 400 });
   }
-  const totalPeople = Math.max(1, Math.round(body.number_of_people || 1));
-  if (totalPeople > 30) return NextResponse.json({ error: "Group is too large." }, { status: 400 });
-  const kids = Math.max(0, Math.round(body.number_of_kids || 0));
-  const nonSwimmers = Math.max(0, Math.round(body.number_of_non_swimmers || 0));
-  if (kids + nonSwimmers > totalPeople) return NextResponse.json({ error: "The headcounts don't add up." }, { status: 400 });
-  const swimmerTypes = (Array.isArray(body.swimmer_course_types) ? body.swimmer_course_types : []).filter((t): t is CourseType => COURSE_TYPES.includes(t));
+  if (!(TIME_SLOTS as readonly string[]).includes(body.course_time)) {
+    return NextResponse.json({ error: `Lesson time must be ${TIME_SLOTS.join(" or ")}.` }, { status: 400 });
+  }
+  const participantError = validateParticipants(body.participants);
+  if (participantError) return NextResponse.json({ error: participantError }, { status: 400 });
+  if (body.waiver_accepted !== true) {
+    return NextResponse.json({ error: "You must accept the liability waiver to book." }, { status: 400 });
+  }
+
+  // Keep only known fields — never store whatever extra the client sent.
+  const participants: Participant[] = body.participants.map((p) => ({
+    group: p.group,
+    gender: p.gender,
+    age: p.age,
+    weight_kg: p.weight_kg,
+    swimmer: p.swimmer,
+  }));
 
   try {
-    const result = await mutateDb((db) => {
-      // ── Capacity check: max N students per day, single instructor ─────────
-      const existingForDate = db.reservations
+    const reservation = await mutateDb((db) => {
+      if (!db.course.is_active) throw new Error("INACTIVE");
+
+      // Capacity: max N students per day, single instructor.
+      const existing = db.reservations
         .filter((r) => r.course_date === body.course_date && r.status !== "cancelled")
         .reduce((sum, r) => sum + r.number_of_people, 0);
       const cap = db.settings.max_students_per_day;
-      if (existingForDate + totalPeople > cap) {
-        const free = Math.max(0, cap - existingForDate);
-        throw new Error(`CAPACITY:${free}:${cap}`);
+      if (existing + participants.length > cap) {
+        throw new Error(`CAPACITY:${Math.max(0, cap - existing)}:${cap}`);
       }
 
-      const price = calcSurfLessonsPrice(
-        {
-          numberOfPeople: totalPeople,
-          numberOfKids: kids,
-          numberOfNonSwimmers: nonSwimmers,
-          swimmerCourseTypes: swimmerTypes,
-          kidsLessonCounts: body.kids_lesson_counts,
-        },
-        db.courses,
-      );
-      if (price.groups.length === 0) {
-        throw new Error("NOPRICE");
-      }
-
-      const order_ref = generateId("LD-");
       const now = new Date().toISOString();
-      const reservation: Reservation = {
+      const r: Reservation = {
         id: generateId(),
-        order_ref,
+        order_ref: generateId("LD-"),
         customer: {
           first_name: body.customer.first_name.trim().slice(0, 60),
           last_name: (body.customer.last_name ?? "").trim().slice(0, 60),
           phone: body.customer.phone.trim().slice(0, 30),
-          email: body.customer.email?.trim().slice(0, 100),
+          email: body.customer.email?.trim().slice(0, 100) || undefined,
         },
         course_date: body.course_date,
-        course_time: typeof body.course_time === "string" ? body.course_time : "08:00",
-        groups: price.groups,
-        number_of_people: totalPeople,
-        subtotal: price.subtotal,
-        discount: price.discount,
-        total_price: price.total,
+        course_time: body.course_time,
+        course_name: db.course.name,
+        price_per_person: db.course.price,
+        participants,
+        number_of_people: participants.length,
+        total_price: totalPrice(participants.length, db.course.price),
         special_requests: body.special_requests?.trim().slice(0, 500) || null,
+        waiver_accepted_at: now,
+        // Always record the version the server actually serves, not what the client claims.
+        waiver_version: WAIVER_VERSION,
         status: "pending",
         created_at: now,
         updated_at: now,
       };
-      db.reservations.push(reservation);
-
-      let boardRental: BoardRental | null = null;
-      if (body.board_rental && body.board_rental.board_type) {
-        const type = db.board_types.find((t) => t.key === body.board_rental!.board_type && t.is_active);
-        if (!type) throw new Error("BOARDTYPE");
-        const quantity = Math.max(1, Math.round(body.board_rental.quantity || 1));
-
-        // Board availability for that date (same capacity logic as the original).
-        const held = db.board_rentals
-          .filter((r) => r.rental_date === body.course_date && r.board_type === type.key && r.status !== "cancelled")
-          .reduce((sum, r) => sum + r.quantity, 0);
-        if (held + quantity > type.quantity) {
-          throw new Error(`BOARDS:${Math.max(0, type.quantity - held)}`);
-        }
-
-        const pricing = body.board_rental.pricing === "day" ? "day" : "hourly";
-        const hours = Math.max(1, Math.round(body.board_rental.planned_hours || 1));
-        const amount = rentalCharge({ pricing, quantity, hours, hourly_price: type.hourly_price, day_price: type.day_price });
-        boardRental = {
-          id: generateId(),
-          order_ref,
-          guest_name: `${reservation.customer.first_name} ${reservation.customer.last_name}`.trim(),
-          guest_phone: reservation.customer.phone,
-          board_type: type.key,
-          quantity,
-          pricing,
-          rental_date: body.course_date,
-          planned_start: pricing === "hourly" ? body.board_rental.planned_start ?? null : null,
-          planned_hours: pricing === "hourly" ? hours : null,
-          amount,
-          status: "pending",
-          created_at: now,
-        };
-        db.board_rentals.push(boardRental);
-      }
-
-      return { reservation, boardRental };
+      db.reservations.push(r);
+      return r;
     });
 
-    return NextResponse.json(result, { status: 201 });
+    return NextResponse.json({ reservation }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Server error";
     if (message.startsWith("CAPACITY:")) {
       const [, free, cap] = message.split(":");
       return NextResponse.json({ error: `Only ${free} spot(s) left for this day (max ${cap}/day).`, freeSlots: Number(free) }, { status: 409 });
     }
-    if (message.startsWith("BOARDS:")) {
-      const free = message.split(":")[1];
-      return NextResponse.json({ error: `Only ${free} board(s) of this type left for this day.` }, { status: 409 });
-    }
-    if (message === "NOPRICE") return NextResponse.json({ error: "Could not calculate the price — check the lesson selection." }, { status: 400 });
-    if (message === "BOARDTYPE") return NextResponse.json({ error: "Invalid board type." }, { status: 400 });
+    if (message === "INACTIVE") return NextResponse.json({ error: "Bookings are currently closed." }, { status: 409 });
     console.error("RESERVATION CREATE ERROR:", err);
     return NextResponse.json({ error: "A server error occurred." }, { status: 500 });
   }

@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "LazyDog Surf",
-  description: "Surf lesson & board rental booking",
+  description: "Book a 1 Day Surf Course in Goa",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

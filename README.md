@@ -1,8 +1,8 @@
-# LazyDog Surf — mini booking system
+# LazyDog Surf — booking system
 
-A simplified version of the Surf Wala project — surf lessons + board rental
-only, no accommodation. Built on Next.js, data is stored in `data/db.json`
-(no database setup needed).
+Booking page for the **1 Day Surf Course** (3,000 Rs per person, lessons at
+08:30 or 10:00). Built on Next.js; data is stored in `data/db.json` (no
+database setup needed).
 
 ## Running it
 
@@ -14,33 +14,39 @@ npm run dev
 Opens at http://localhost:3000
 
 - **Customer booking page**: `/`
-- **Admin dashboard**: `/admin` (password `lazydog`, changeable via `ADMIN_PASSWORD` in `.env.local`)
+- **Admin dashboard**: `/admin` — not linked anywhere; password `0000`
+  (change it with `ADMIN_PASSWORD` in `.env.local`)
 
-## What's kept from the original project
+## Booking flow
 
-- **Lesson pricing logic** (`lib/pricing.ts`) — the exact same logic as Surf
-  Wala (`lib/surf-pricing.ts`): each swimmer can pick a different course,
-  non-swimmers automatically go to a Private Lesson, kids are priced per
-  lesson, 10% group discount for 3+ adults. (The seasonal "Peak Holiday"
-  accommodation pricing was dropped, since LazyDog Surf has no accommodation.)
-- **Board rental logic** (`lib/board-rental.ts`) — ported 1:1: hourly vs. day
-  pricing (never more than the day price), availability by quantity, pickup
-  time windows.
+1. **Details** — number of adults and children, then for **each person**:
+   gender, age, weight and a Swimmer / Non-swimmer toggle. Date (rolling
+   4 weeks from tomorrow, days without enough free spots are disabled) and
+   lesson time.
+2. **Your details** — name, phone, email, notes, a summary, and the
+   **liability waiver**, which must be ticked before the booking can be sent.
+   The server rejects bookings without it and stores when it was accepted and
+   which waiver version was shown.
 
-## What's simplified compared to the original project
+## Rules
 
-- No accommodation, housekeeping, or rooms.
-- No assigning multiple instructors — just one instructor, so a simple daily
-  cap (default **8 students/day**, editable in Settings).
-- One simple admin password instead of a role system.
-- No emails / Google Calendar sync.
-- Data in a JSON file instead of Supabase (easy to run; can be swapped for a
-  real database later if it grows).
+- One product: the 1 Day Surf Course, flat price per person (edit name,
+  price and open/closed in Admin → Settings).
+- Max 8 people per booking; max students per day (default 8, single
+  instructor) editable in Admin → Settings.
+- All rules live in `lib/booking.ts`; the waiver text in `lib/waiver.ts`
+  (bump `WAIVER_VERSION` whenever you change the wording).
 
 ## Admin dashboard
 
-- **Calendar** (`/admin/calendar`) — monthly view, each day shows an `x/8`
-  badge; clicking a day shows that day's bookings and board rentals with
-  confirm/cancel actions.
-- **Settings** (`/admin/settings`) — edit lesson prices, board prices and
-  quantities, the daily student cap, and rental pickup times.
+- **Calendar** (`/admin/calendar`) — monthly view with an `x/8` badge per day;
+  click a day to see every booking with each participant's gender, age,
+  weight and swim ability (non-swimmers highlighted), plus confirm / cancel.
+- **Settings** (`/admin/settings`) — course name and price, bookings on/off,
+  daily student cap.
+
+## Not included yet
+
+- No confirmation emails.
+- `data/db.json` needs a server with a writable disk. Serverless hosting
+  (e.g. Vercel) can't write to it — bookings there need a real database.

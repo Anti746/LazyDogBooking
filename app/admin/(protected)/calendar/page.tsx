@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { BoardRental, Reservation, ReservationStatus } from "@/lib/types";
-import type { RentalSettings } from "@/lib/board-rental";
+import type { Reservation, ReservationStatus, Settings } from "@/lib/types";
 
 function ymd(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -18,20 +17,17 @@ const STATUS_CLASS: Record<ReservationStatus, string> = {
 export default function CalendarPage() {
   const [month, setMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
   const [reservations, setReservations] = useState<Reservation[]>([]);
-  const [boardRentals, setBoardRentals] = useState<BoardRental[]>([]);
-  const [settings, setSettings] = useState<RentalSettings | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function load() {
     setLoading(true);
-    const [res, rentals, sett] = await Promise.all([
+    const [res, sett] = await Promise.all([
       fetch("/api/reservations").then((r) => r.json()),
-      fetch("/api/board-rentals").then((r) => r.json()),
       fetch("/api/settings").then((r) => r.json()),
     ]);
     setReservations(Array.isArray(res) ? res : []);
-    setBoardRentals(Array.isArray(rentals) ? rentals : []);
     setSettings(sett);
     setLoading(false);
   }
@@ -68,17 +64,11 @@ export default function CalendarPage() {
   const today = ymd(new Date());
 
   const selectedReservations = reservations.filter((r) => r.course_date === selected).sort((a, b) => a.course_time.localeCompare(b.course_time));
-  const selectedBoardRentals = boardRentals.filter((r) => r.rental_date === selected);
 
   async function setStatus(id: string, status: ReservationStatus) {
     await fetch(`/api/reservations/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
     load();
   }
-  async function setRentalStatus(id: string, status: ReservationStatus) {
-    await fetch(`/api/board-rentals/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
-    load();
-  }
-
   return (
     <div>
       <div className="mb-5 flex items-center justify-between">
@@ -137,7 +127,7 @@ export default function CalendarPage() {
             <button onClick={() => setSelected(null)} className="text-sm text-ink-soft hover:underline">Close</button>
           </div>
 
-          {selectedReservations.length === 0 && selectedBoardRentals.length === 0 ? (
+          {selectedReservations.length === 0 ? (
             <p className="text-ink-soft">No bookings for this day yet.</p>
           ) : (
             <div className="space-y-3">
@@ -145,14 +135,21 @@ export default function CalendarPage() {
                 <div key={r.id} className="rounded-xl border border-line p-4">
                   <div className="flex flex-wrap items-start justify-between gap-2">
                     <div>
-                      <p className="font-semibold">{r.course_time} · {r.customer.first_name} {r.customer.last_name} · {r.number_of_people} os.</p>
-                      <p className="text-sm text-ink-soft">{r.groups.map((g) => `${g.number_of_people}× ${g.course_name}`).join(", ")}</p>
+                      <p className="font-semibold">{r.course_time} · {r.customer.first_name} {r.customer.last_name} · {r.number_of_people} {r.number_of_people === 1 ? "person" : "people"}</p>
+                      <ul className="mt-1 space-y-0.5 text-sm text-ink-soft">
+                        {r.participants.map((p, i) => (
+                          <li key={i}>
+                            {p.group === "adult" ? "Adult" : "Child"} · {p.gender === "male" ? "M" : "F"} · {p.age} y · {p.weight_kg} kg ·{" "}
+                            <span className={p.swimmer ? "" : "font-bold text-rust"}>{p.swimmer ? "swimmer" : "NON-SWIMMER"}</span>
+                          </li>
+                        ))}
+                      </ul>
                       <p className="text-sm text-ink-soft">{r.customer.phone}{r.customer.email ? ` · ${r.customer.email}` : ""}</p>
                       {r.special_requests && <p className="text-sm italic text-ink-soft">„{r.special_requests}"</p>}
                     </div>
                     <div className="text-right">
                       <p className="font-bold">{r.total_price.toLocaleString()} Rs</p>
-                      {r.discount > 0 && <p className="text-xs text-sage-dark">discount −{r.discount.toLocaleString()} Rs</p>}
+                      <p className="text-xs text-ink-soft">Waiver ✓ {new Date(r.waiver_accepted_at).toLocaleDateString("en-GB")} (v{r.waiver_version})</p>
                       <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${STATUS_CLASS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                     </div>
                   </div>
@@ -164,27 +161,6 @@ export default function CalendarPage() {
                 </div>
               ))}
 
-              {selectedBoardRentals.map((r) => (
-                <div key={r.id} className="rounded-xl border border-line bg-sand/50 p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div>
-                      <p className="font-semibold">Board: {r.guest_name} · {r.quantity}× {r.board_type}</p>
-                      <p className="text-sm text-ink-soft">
-                        {r.pricing === "day" ? "Full day" : `${r.planned_hours ?? 1} h od ${r.planned_start ?? "?"}`}
-                        {r.guest_phone ? ` · ${r.guest_phone}` : ""}
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="font-bold">{r.amount.toLocaleString()} Rs</p>
-                      <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${STATUS_CLASS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
-                    </div>
-                  </div>
-                  <div className="mt-3 flex gap-2">
-                    {r.status !== "confirmed" && <button onClick={() => setRentalStatus(r.id, "confirmed")} className="rounded-lg bg-brown px-3 py-1.5 text-sm font-semibold text-white hover:bg-brown-dark">Confirm</button>}
-                    {r.status !== "cancelled" && <button onClick={() => setRentalStatus(r.id, "cancelled")} className="rounded-lg border border-line px-3 py-1.5 text-sm font-semibold hover:bg-sand">Cancel</button>}
-                  </div>
-                </div>
-              ))}
             </div>
           )}
         </section>
