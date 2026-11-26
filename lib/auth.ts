@@ -6,8 +6,8 @@
 //     session token (HMAC-SHA256), valid for 8 hours.
 //   • Cookie is HttpOnly, SameSite=Strict, and Secure in production.
 //   • Password comparison is constant-time.
-//   • In production the admin login refuses to work unless ADMIN_PASSWORD is
-//     set to something strong (12+ characters). "0000" only works locally.
+//   • Login stays disabled until an explicit 16+ character ADMIN_PASSWORD and
+//     an independent 32+ character SESSION_SECRET are configured; no default password.
 //   • Changing ADMIN_PASSWORD (or SESSION_SECRET) logs everyone out.
 // ─────────────────────────────────────────────────────────────────────────────
 import "server-only";
@@ -15,19 +15,24 @@ import { createHash, createHmac, timingSafeEqual } from "crypto";
 
 export const ADMIN_COOKIE_NAME = "lazydog_admin";
 export const SESSION_HOURS = 8;
-const MIN_PROD_PASSWORD_LENGTH = 12;
+const MIN_PASSWORD_LENGTH = 16;
+const MIN_SESSION_SECRET_LENGTH = 32;
 
 const isProd = process.env.NODE_ENV === "production";
 
 function adminPassword(): string {
-  return process.env.ADMIN_PASSWORD || (isProd ? "" : "0000");
+  return process.env.ADMIN_PASSWORD ?? "";
 }
 
 /** Null if the admin login may be used; otherwise the reason it's disabled. */
 export function adminLoginProblem(): string | null {
   const pw = adminPassword();
-  if (isProd && pw.length < MIN_PROD_PASSWORD_LENGTH) {
-    return `Admin login is disabled: set ADMIN_PASSWORD to at least ${MIN_PROD_PASSWORD_LENGTH} characters in the server environment.`;
+  const sessionSecret = process.env.SESSION_SECRET ?? "";
+  if (pw.length < MIN_PASSWORD_LENGTH) {
+    return `Admin login is disabled: set ADMIN_PASSWORD to at least ${MIN_PASSWORD_LENGTH} characters in the server environment.`;
+  }
+  if (sessionSecret.length < MIN_SESSION_SECRET_LENGTH) {
+    return `Admin login is disabled: set SESSION_SECRET to at least ${MIN_SESSION_SECRET_LENGTH} characters in the server environment.`;
   }
   return null;
 }
