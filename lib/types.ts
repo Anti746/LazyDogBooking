@@ -15,8 +15,6 @@ export interface Course {
 export type Gender = "male" | "female";
 
 export interface Participant {
-  /** "adult" or "child" — as the booker grouped them on the form */
-  group: "adult" | "child";
   gender: Gender;
   age: number;
   /** Body weight in kg — used to pick the right board size */
@@ -24,19 +22,14 @@ export interface Participant {
   swimmer: boolean;
 }
 
-export interface Customer {
-  first_name: string;
-  last_name: string;
-  phone: string;
-  email?: string;
-}
-
 export type ReservationStatus = "pending" | "confirmed" | "cancelled";
 
 export interface Reservation {
   id: string;
   order_ref: string;
-  customer: Customer;
+  customer_name: string;
+  customer_phone: string;
+  customer_email: string | null;
   course_date: string; // YYYY-MM-DD
   course_time: string; // one of TIME_SLOTS
   course_name: string;
@@ -44,7 +37,7 @@ export interface Reservation {
   participants: Participant[];
   number_of_people: number;
   subtotal: number;
-  /** Group discount (10% off adults when 3+ adults) */
+  /** Group discount (10% when 3+ people) */
   discount: number;
   total_price: number;
   special_requests: string | null;
@@ -62,7 +55,7 @@ export interface Settings {
 }
 
 export interface CreateBookingRequest {
-  customer: Customer;
+  customer: { name: string; phone: string; email?: string };
   course_date: string;
   course_time: string;
   participants: Participant[];

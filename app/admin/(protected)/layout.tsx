@@ -1,24 +1,24 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ADMIN_COOKIE_NAME, checkPassword } from "@/lib/auth";
+import { ADMIN_COOKIE_NAME, verifySessionToken } from "@/lib/auth";
 import LogoutButton from "./logout-button";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const cookieStore = cookies();
-  const value = cookieStore.get(ADMIN_COOKIE_NAME)?.value;
-  const authed = !!value && checkPassword(value);
+  const authed = verifySessionToken(cookieStore.get(ADMIN_COOKIE_NAME)?.value);
 
   if (!authed) redirect("/admin/login");
 
   return (
     <div className="min-h-screen bg-sand">
       <header className="border-b border-line bg-paper px-5 py-4">
-        <div className="mx-auto flex max-w-5xl items-center justify-between">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-3">
           <h1 className="text-xl font-bold text-brown-dark">LazyDog Surf — Admin</h1>
-          <nav className="flex items-center gap-4 text-sm font-semibold">
+          <nav className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm font-semibold">
             <Link href="/admin/calendar" className="hover:underline">Calendar</Link>
             <Link href="/admin/settings" className="hover:underline">Settings</Link>
+            <Link href="/admin/customer-data" className="hover:underline">Customer data</Link>
             <Link href="/" className="hover:underline">Booking Page</Link>
             <LogoutButton />
           </nav>

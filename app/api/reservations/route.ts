@@ -1,101 +1,84 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
 import { TIME_SLOTS, calcPrice, validateParticipants } from "@/lib/booking";
-import { generateId, mutateDb, readDb, todayLocal } from "@/lib/store";
+import { BookingError, createBooking, getCourse, listReservations, purgeExpiredPersonalData } from "@/lib/db";
+import { rateLimit } from "@/lib/rate-limit";
 import { WAIVER_VERSION } from "@/lib/waiver";
-import type { CreateBookingRequest, Participant, Reservation } from "@/lib/types";
+import type { CreateBookingRequest, Participant } from "@/lib/types";
 
-// ── GET — admin only: list all bookings ──────────────────────────────────────
+function todayLocal(offsetDays = 0): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// ── GET — admin only: bookings between ?from=YYYY-MM-DD&to=YYYY-MM-DD ─────────
 export async function GET(request: Request) {
   if (!isAuthed(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  const db = await readDb();
-  return NextResponse.json(db.reservations.sort((a, b) => b.created_at.localeCompare(a.created_at)));
+  const { searchParams } = new URL(request.url);
+  const from = searchParams.get("from") ?? "";
+  const to = searchParams.get("to") ?? "";
+  if (!DATE.test(from) || !DATE.test(to)) return NextResponse.json({ error: "Provide ?from and ?to as YYYY-MM-DD" }, { status: 400 });
+  // Storage limitation: drop anything past the retention period whenever the
+  // admin looks at bookings (in addition to the scheduled job, if set up).
+  await purgeExpiredPersonalData().catch((e) => console.error("PURGE ERROR:", e instanceof Error ? e.message : e));
+  return NextResponse.json(await listReservations(from, to), { headers: { "Cache-Control": "no-store" } });
 }
 
 // ── POST — public: create a booking ──────────────────────────────────────────
 export async function POST(request: Request) {
+  if (!rateLimit(request, "booking", 10, 10 * 60_000)) {
+    return NextResponse.json({ error: "Too many attempts — please try again in a few minutes." }, { status: 429 });
+  }
   const body = (await request.json().catch(() => null)) as CreateBookingRequest | null;
-  if (!body || !body.customer?.first_name?.trim() || !body.customer?.phone?.trim()) {
-    return NextResponse.json({ error: "Name and phone are required." }, { status: 400 });
-  }
-  if (!body.course_date || !/^\d{4}-\d{2}-\d{2}$/.test(body.course_date)) {
-    return NextResponse.json({ error: "Invalid date." }, { status: 400 });
-  }
-  if (body.course_date <= todayLocal()) {
-    return NextResponse.json({ error: "The lesson date must be at least tomorrow." }, { status: 400 });
-  }
-  if (!(TIME_SLOTS as readonly string[]).includes(body.course_time)) {
-    return NextResponse.json({ error: `Lesson time must be ${TIME_SLOTS.join(" or ")}.` }, { status: 400 });
-  }
+  const name = typeof body?.customer?.name === "string" ? body.customer.name.trim() : "";
+  const phone = typeof body?.customer?.phone === "string" ? body.customer.phone.trim() : "";
+  const email = typeof body?.customer?.email === "string" ? body.customer.email.trim() : "";
+  if (!body || !name || !phone) return NextResponse.json({ error: "Name and phone are required." }, { status: 400 });
+  if (name.length > 120 || phone.length < 3 || phone.length > 30) return NextResponse.json({ error: "Please check your name and phone number." }, { status: 400 });
+  if (email && (email.length > 100 || !EMAIL.test(email))) return NextResponse.json({ error: "Please check your email address." }, { status: 400 });
+  if (typeof body.course_date !== "string" || !DATE.test(body.course_date)) return NextResponse.json({ error: "Invalid date." }, { status: 400 });
+  if (body.course_date <= todayLocal()) return NextResponse.json({ error: "The lesson date must be at least tomorrow." }, { status: 400 });
+  if (!(TIME_SLOTS as readonly string[]).includes(body.course_time)) return NextResponse.json({ error: `Lesson time must be ${TIME_SLOTS.join(" or ")}.` }, { status: 400 });
   const participantError = validateParticipants(body.participants);
   if (participantError) return NextResponse.json({ error: participantError }, { status: 400 });
-  if (body.waiver_accepted !== true) {
-    return NextResponse.json({ error: "You must accept the liability waiver to book." }, { status: 400 });
-  }
+  if (body.waiver_accepted !== true) return NextResponse.json({ error: "You must accept the liability waiver to book." }, { status: 400 });
 
   // Keep only known fields — never store whatever extra the client sent.
-  const participants: Participant[] = body.participants.map((p) => ({
-    group: p.group,
-    gender: p.gender,
-    age: p.age,
-    weight_kg: p.weight_kg,
-    swimmer: p.swimmer,
-  }));
+  const participants: Participant[] = body.participants.map((p) => ({ gender: p.gender, age: p.age, weight_kg: p.weight_kg, swimmer: p.swimmer }));
 
   try {
-    const reservation = await mutateDb((db) => {
-      if (!db.course.is_active) throw new Error("INACTIVE");
-
-      // Capacity: max N students per day, single instructor.
-      const existing = db.reservations
-        .filter((r) => r.course_date === body.course_date && r.status !== "cancelled")
-        .reduce((sum, r) => sum + r.number_of_people, 0);
-      const cap = db.settings.max_students_per_day;
-      if (existing + participants.length > cap) {
-        throw new Error(`CAPACITY:${Math.max(0, cap - existing)}:${cap}`);
-      }
-
-      const price = calcPrice(participants.map((p) => p.group), db.course.price);
-      const now = new Date().toISOString();
-      const r: Reservation = {
-        id: generateId(),
-        order_ref: generateId("LD-"),
-        customer: {
-          first_name: body.customer.first_name.trim().slice(0, 60),
-          last_name: (body.customer.last_name ?? "").trim().slice(0, 60),
-          phone: body.customer.phone.trim().slice(0, 30),
-          email: body.customer.email?.trim().slice(0, 100) || undefined,
-        },
-        course_date: body.course_date,
-        course_time: body.course_time,
-        course_name: db.course.name,
-        price_per_person: db.course.price,
-        participants,
-        number_of_people: participants.length,
-        subtotal: price.subtotal,
-        discount: price.discount,
-        total_price: price.total,
-        special_requests: body.special_requests?.trim().slice(0, 500) || null,
-        waiver_accepted_at: now,
-        // Always record the version the server actually serves, not what the client claims.
-        waiver_version: WAIVER_VERSION,
-        status: "pending",
-        created_at: now,
-        updated_at: now,
-      };
-      db.reservations.push(r);
-      return r;
+    const course = await getCourse();
+    if (!course.is_active) return NextResponse.json({ error: "Bookings are currently closed." }, { status: 409 });
+    const price = calcPrice(participants.length, course.price);
+    const result = await createBooking({
+      customer_name: name,
+      customer_phone: phone,
+      customer_email: email || null,
+      course_date: body.course_date,
+      course_time: body.course_time,
+      participants,
+      special_requests: typeof body.special_requests === "string" ? body.special_requests.trim().slice(0, 500) || null : null,
+      // Always record the version the server actually serves, not what the client claims.
+      waiver_version: WAIVER_VERSION,
+      price_per_person: course.price,
+      subtotal: price.subtotal,
+      discount: price.discount,
+      total_price: price.total,
     });
-
-    return NextResponse.json({ reservation }, { status: 201 });
+    // Return only what the confirmation screen needs — no personal data.
+    return NextResponse.json({ reservation: { order_ref: result.order_ref, total_price: result.total_price } }, { status: 201 });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Server error";
-    if (message.startsWith("CAPACITY:")) {
-      const [, free, cap] = message.split(":");
-      return NextResponse.json({ error: `Only ${free} spot(s) left for this day (max ${cap}/day).`, freeSlots: Number(free) }, { status: 409 });
+    if (err instanceof BookingError) {
+      if (err.code === "CAPACITY") return NextResponse.json({ error: `Only ${err.free} spot(s) left for this day (max ${err.cap}/day).`, freeSlots: err.free }, { status: 409 });
+      if (err.code === "BOOKINGS_CLOSED") return NextResponse.json({ error: "Bookings are currently closed." }, { status: 409 });
+      return NextResponse.json({ error: "The price has just changed — please reload the page." }, { status: 409 });
     }
-    if (message === "INACTIVE") return NextResponse.json({ error: "Bookings are currently closed." }, { status: 409 });
-    console.error("RESERVATION CREATE ERROR:", err);
+    // Log the error message only — never the request body (personal data).
+    console.error("RESERVATION CREATE ERROR:", err instanceof Error ? err.message : err);
     return NextResponse.json({ error: "A server error occurred." }, { status: 500 });
   }
 }

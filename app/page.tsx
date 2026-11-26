@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_PEOPLE_PER_BOOKING, TIME_SLOTS, WEIGHT_MAX, WEIGHT_MIN, ageRange, calcPrice, GROUP_DISCOUNT_MIN_ADULTS } from "@/lib/booking";
+import { AGE_MAX, AGE_MIN, GROUP_DISCOUNT_MIN_PEOPLE, MAX_PEOPLE_PER_BOOKING, TIME_SLOTS, WEIGHT_MAX, WEIGHT_MIN, calcPrice } from "@/lib/booking";
 import { WAIVER_CHECKBOX_LABEL, WAIVER_CLAUSES, WAIVER_TITLE, WAIVER_VERSION } from "@/lib/waiver";
 import type { PriceBreakdown } from "@/lib/booking";
-import type { Course, Gender, Participant } from "@/lib/types";
+import type { Course, Gender } from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Two screens, one card:
 //   1) details — who's coming (one card per person: gender, age, weight,
 //                swimmer / non-swimmer), date and time
 //   2) contact — name / phone / email / notes, summary, liability waiver
-// One product only: the 1 Day Surf Course, priced per person, 10% off the
-// adults when 3+ adults book together (lib/booking.ts).
+// One product only: the 1 Day Surf Course, same for everyone, priced per
+// person, 10% off when 3+ people book together (lib/booking.ts).
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Stage = "details" | "contact" | "completed";
@@ -21,14 +21,13 @@ interface DayInfo { booked: number; cap: number; free: number }
 
 /** A participant while the form is being filled in — every field starts empty. */
 interface Draft {
-  group: Participant["group"];
   gender: Gender | null;
   age: number | null;
   weight_kg: number | null;
   swimmer: boolean | null;
 }
 
-const COUNT_OPTIONS = Array.from({ length: MAX_PEOPLE_PER_BOOKING + 1 }, (_, i) => i); // 0..8
+const COUNT_OPTIONS = Array.from({ length: MAX_PEOPLE_PER_BOOKING }, (_, i) => i + 1); // 1..8
 const WEIGHT_OPTIONS = Array.from({ length: (WEIGHT_MAX - WEIGHT_MIN) / 5 + 1 }, (_, i) => WEIGHT_MIN + i * 5); // 15, 20 … 150
 const WINDOW_DAYS = 28;
 
@@ -42,8 +41,8 @@ function prettyDate(s: string): string {
   return new Date(s + "T00:00:00").toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
 }
 
-function emptyDraft(group: Participant["group"]): Draft {
-  return { group, gender: null, age: null, weight_kg: null, swimmer: null };
+function emptyDraft(): Draft {
+  return { gender: null, age: null, weight_kg: null, swimmer: null };
 }
 
 function missingField(p: Draft): string | null {
@@ -77,9 +76,8 @@ function Toggle<T extends string | boolean>({ value, options, onChange, bad }: {
 function PriceLines({ price, unit }: { price: PriceBreakdown; unit: number }) {
   return (
     <>
-      {price.adults > 0 && <p>{price.adults} adult{price.adults > 1 ? "s" : ""} × {unit.toLocaleString()} Rs = {(price.adults * unit).toLocaleString()} Rs</p>}
-      {price.children > 0 && <p>{price.children} child{price.children > 1 ? "ren" : ""} × {unit.toLocaleString()} Rs = {(price.children * unit).toLocaleString()} Rs</p>}
-      {price.discount > 0 && <p className="text-accent">Group discount (10% off adults) −{price.discount.toLocaleString()} Rs</p>}
+      <p>{price.people} {price.people === 1 ? "person" : "people"} × {unit.toLocaleString()} Rs = {price.subtotal.toLocaleString()} Rs</p>
+      {price.discount > 0 && <p className="text-accent">Group discount (10%) −{price.discount.toLocaleString()} Rs</p>}
       <p className="pt-1 text-sm font-semibold text-slate">Total <span className="text-accent">{price.total.toLocaleString()} Rs</span></p>
     </>
   );
@@ -96,27 +94,21 @@ export default function BookingPage() {
   useEffect(() => { topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }); }, [stage]);
 
   // ── People ──────────────────────────────────────────────────────────────
-  const [adults, setAdults] = useState(1);
-  const [kids, setKids] = useState(0);
-  const [people, setPeople] = useState<Draft[]>([emptyDraft("adult")]);
+  const [headcount, setHeadcount] = useState(1);
+  const [people, setPeople] = useState<Draft[]>([emptyDraft()]);
 
   // Keep one card per person in sync with the two counters, preserving what's
   // already filled in for people who stay.
   useEffect(() => {
     setPeople((prev) => {
-      const prevAdults = prev.filter((p) => p.group === "adult");
-      const prevKids = prev.filter((p) => p.group === "child");
-      const a = Array.from({ length: adults }, (_, i) => prevAdults[i] ?? emptyDraft("adult"));
-      const k = Array.from({ length: kids }, (_, i) => prevKids[i] ?? emptyDraft("child"));
-      return [...a, ...k];
+      return Array.from({ length: headcount }, (_, i) => prev[i] ?? emptyDraft());
     });
-  }, [adults, kids]);
+  }, [headcount]);
 
   function updatePerson(i: number, patch: Partial<Draft>) {
     setPeople((prev) => prev.map((p, j) => (j === i ? { ...p, ...patch } : p)));
   }
 
-  const headcount = adults + kids;
 
   // ── Date & time ─────────────────────────────────────────────────────────
   const [date, setDate] = useState("");
@@ -177,17 +169,14 @@ export default function BookingPage() {
   useEffect(() => { setDetailsMsg(null); }, [people, date, time]);
   useEffect(() => { setContactMsg(null); }, [name, phone, waiverAccepted]);
 
-  const price = calcPrice(people.map((p) => p.group), course?.price ?? 0);
+  const price = calcPrice(headcount, course?.price ?? 0);
 
   function personLabel(i: number): string {
-    const p = people[i];
-    const n = people.slice(0, i + 1).filter((x) => x.group === p.group).length;
-    return `${p.group === "adult" ? "Adult" : "Child"} ${n}`;
+    return `Person ${i + 1}`;
   }
 
   function goToContact() {
     setShowErrors(true);
-    if (headcount === 0) return setDetailsMsg("Add at least one adult or child.");
     const badIndex = people.findIndex((p) => missingField(p) !== null);
     if (badIndex >= 0) {
       document.getElementById(`person-${badIndex}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -212,7 +201,7 @@ export default function BookingPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          customer: { first_name: name, last_name: "", phone, email },
+          customer: { name, phone, email },
           course_date: date,
           course_time: time,
           participants: people,
@@ -233,7 +222,7 @@ export default function BookingPage() {
   }
 
   function resetAll() {
-    setAdults(1); setKids(0); setPeople([emptyDraft("adult")]);
+    setHeadcount(1); setPeople([emptyDraft()]);
     setDate(""); setTime(""); setPage(0);
     setName(""); setPhone(""); setEmail(""); setNotes(""); setWaiverAccepted(false);
     setShowErrors(false); setDetailsMsg(null); setContactMsg(null); setConfirmation(null);
@@ -268,27 +257,18 @@ export default function BookingPage() {
                 <span className="font-mono2 text-sm font-semibold text-accent">{course ? `${course.price.toLocaleString()} Rs / person` : "…"}</span>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <span className={labelCls}>Adults (18+)</span>
-                  <select className={`${fieldCls} border-line2`} value={adults} onChange={(e) => setAdults(Number(e.target.value))}>
-                    {COUNT_OPTIONS.filter((n) => n + kids <= MAX_PEOPLE_PER_BOOKING).map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <span className={labelCls}>Children (5–17)</span>
-                  <select className={`${fieldCls} border-line2`} value={kids} onChange={(e) => setKids(Number(e.target.value))}>
-                    {COUNT_OPTIONS.filter((n) => n + adults <= MAX_PEOPLE_PER_BOOKING).map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                </div>
+              <div>
+                <span className={labelCls}>Number of people</span>
+                <select className={`${fieldCls} border-line2`} value={headcount} onChange={(e) => setHeadcount(Number(e.target.value))}>
+                  {COUNT_OPTIONS.map((n) => <option key={n} value={n}>{n}</option>)}
+                </select>
               </div>
 
               {people.length > 0 && (
                 <div className="space-y-3">
                   {people.map((p, i) => {
-                    const [ageMin, ageMax] = ageRange(p.group);
                     return (
-                      <div key={`${p.group}-${i}`} id={`person-${i}`} className="space-y-3 rounded-xl border border-line2 p-4">
+                      <div key={i} id={`person-${i}`} className="space-y-3 rounded-xl border border-line2 p-4">
                         <p className="font-heading text-base font-bold">{personLabel(i)}</p>
                         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                           <div>
@@ -317,7 +297,7 @@ export default function BookingPage() {
                               onChange={(e) => updatePerson(i, { age: e.target.value === "" ? null : Number(e.target.value) })}
                             >
                               <option value="">Select age</option>
-                              {Array.from({ length: ageMax - ageMin + 1 }, (_, k) => ageMin + k).map((n) => <option key={n} value={n}>{n}</option>)}
+                              {Array.from({ length: AGE_MAX - AGE_MIN + 1 }, (_, k) => AGE_MIN + k).map((n) => <option key={n} value={n}>{n}</option>)}
                             </select>
                           </div>
                           <div>
@@ -404,8 +384,8 @@ export default function BookingPage() {
               {course && headcount > 0 && (
                 <div className="space-y-1 rounded-xl border border-line2 bg-surface px-4 py-3 font-mono2 text-xs text-slate-soft">
                   <PriceLines price={price} unit={course.price} />
-                  {price.discount === 0 && adults > 0 && adults < GROUP_DISCOUNT_MIN_ADULTS && (
-                    <p className="text-[11px]">Book {GROUP_DISCOUNT_MIN_ADULTS}+ adults together and adults get 10% off.</p>
+                  {price.discount === 0 && (
+                    <p className="text-[11px]">Book {GROUP_DISCOUNT_MIN_PEOPLE}+ people together and get 10% off.</p>
                   )}
                 </div>
               )}
@@ -436,7 +416,7 @@ export default function BookingPage() {
                 </div>
                 <div>
                   <span className={labelCls}>Notes (optional)</span>
-                  <textarea className={`${fieldCls} min-h-[72px] border-line2`} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Injuries, medical conditions, anything we should know…" />
+                  <textarea className={`${fieldCls} min-h-[72px] border-line2`} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Anything we should know (please no medical details — tell the instructor in person)" />
                 </div>
               </div>
 
@@ -476,6 +456,10 @@ export default function BookingPage() {
                   {submitting ? "Submitting…" : "Confirm Booking"}
                 </button>
               </div>
+              <p className="text-center text-xs text-slate-soft">
+                We use your details only to run this lesson safely — see our{" "}
+                <a href="/privacy" target="_blank" rel="noopener" className="font-semibold text-slate underline hover:text-accent">Privacy Policy</a>.
+              </p>
             </div>
           )}
 
@@ -500,6 +484,9 @@ export default function BookingPage() {
             </div>
           )}
         </div>
+        <p className="mt-4 text-center font-mono2 text-[10px] uppercase tracking-widest text-slate-soft">
+          <a href="/privacy" className="hover:text-accent">Privacy Policy</a>
+        </p>
       </div>
     </div>
   );
