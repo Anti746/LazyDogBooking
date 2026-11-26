@@ -49,6 +49,8 @@ Variables). For local development, copy `.env.example` to `.env.local`.
 | `DATABASE_CA_CERT` | Recommended. Supabase → Database → SSL Configuration → download the certificate and paste its contents (newlines as `\n`). Enables full TLS certificate verification. |
 | `ADMIN_PASSWORD` | Admin password. **In production it must be 12+ characters**, otherwise the admin login is switched off. Locally it defaults to `0000`. |
 | `SESSION_SECRET` | Optional: any long random string, used to sign admin sessions. |
+| `GMAIL_USER` | Gmail address the booking emails are sent from — the same one as in the Surf Wala project. New-booking notifications also go to this address. |
+| `GMAIL_APP_PASSWORD` | Google **App password** for that account (same as Surf Wala). |
 
 ## 3. Before going live — checklist
 
@@ -56,6 +58,7 @@ Variables). For local development, copy `.env.example` to `.env.local`.
       [`lib/legal.ts`](lib/legal.ts). Until then `/privacy` shows a red
       "Draft" warning.
 - [ ] Strong `ADMIN_PASSWORD` set on the host.
+- [ ] `GMAIL_USER` and `GMAIL_APP_PASSWORD` set on the host (same as Surf Wala).
 - [ ] Supabase project in an EU region, Data API disabled, DPA signed.
 - [ ] Have a lawyer check the liability waiver
       ([`lib/waiver.ts`](lib/waiver.ts)) and the privacy policy
@@ -78,7 +81,7 @@ npm run dev                  # http://localhost:3000
 | | |
 |---|---|
 | **No public database access** | The browser never talks to the database. All reads and writes go through the server, which connects as `lazydog_app` — a role that can only do what the app needs. It can't insert bookings directly (only via `create_booking()`), can't change prices of existing bookings, can't create tables. Row Level Security is on for every table; Supabase's public `anon` / `authenticated` keys have every privilege revoked. |
-| **Data minimisation** | Booker: name, phone, optional email. Participants: gender, age, weight, swim ability — no names. Notes field asks people *not* to write medical details. |
+| **Data minimisation** | Booker: name, phone, email (for the booking emails). Participants: gender, age, weight, swim ability — no names. Notes field asks people *not* to write medical details. |
 | **Storage limitation** | Bookings are deleted automatically 24 months after the lesson date (nightly job + every time the admin calendar loads). Change in `0001_init.sql` and `lib/legal.ts` together. |
 | **Data subject rights** | Admin → **Customer data**: search by email, phone or booking reference → **Export (JSON)** for access requests, **Delete all** for erasure requests. Each booking in the calendar also has **Delete data**. |
 | **Admin login** | Cookie holds a signed 8-hour session token (never the password); HttpOnly, SameSite=Strict, Secure; constant-time password check; 5 attempts per 15 min per IP. |
@@ -96,6 +99,16 @@ npm run dev                  # http://localhost:3000
 - `lib/auth.ts` — admin sessions
 - `supabase/migrations/` — schema, permissions, functions, retention job
 
-## Not included yet
+## Emails
 
-- Confirmation emails.
+Sent from `GMAIL_USER`, labelled "LazyDog Surf" (`lib/email.ts`):
+
+1. **Booking request → customer**: summary, 50% deposit, bank details and
+   the UPI QR code (`lib/payment.ts`). Subject: *LazyDog reservation —
+   request received*.
+2. **Booking request → you** (`GMAIL_USER`): new booking waiting for
+   confirmation.
+3. **Admin clicks Confirm → customer**: *LazyDog reservation confirmed*.
+
+If sending fails the booking is still saved; the customer's screen and the
+admin calendar say so.

@@ -164,10 +164,10 @@ export default function BookingPage() {
   const [detailsMsg, setDetailsMsg] = useState<string | null>(null);
   const [contactMsg, setContactMsg] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [confirmation, setConfirmation] = useState<{ order_ref: string; total: number } | null>(null);
+  const [confirmation, setConfirmation] = useState<{ order_ref: string; total: number; emailSent: boolean } | null>(null);
 
   useEffect(() => { setDetailsMsg(null); }, [people, date, time]);
-  useEffect(() => { setContactMsg(null); }, [name, phone, waiverAccepted]);
+  useEffect(() => { setContactMsg(null); }, [name, phone, email, waiverAccepted]);
 
   const price = calcPrice(headcount, course?.price ?? 0);
 
@@ -192,7 +192,8 @@ export default function BookingPage() {
   }
 
   async function submit() {
-    if (!name.trim() || !phone.trim()) return setContactMsg("Please fill in your name and phone number.");
+    if (!name.trim() || !phone.trim() || !email.trim()) return setContactMsg("Please fill in your name, phone number and email.");
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return setContactMsg("Please check your email address.");
     if (!waiverAccepted) return setContactMsg("Please read and accept the liability waiver to continue.");
     setSubmitting(true);
     setContactMsg(null);
@@ -212,7 +213,7 @@ export default function BookingPage() {
       });
       const data = await res.json();
       if (!res.ok) return setContactMsg(data.error || "Something went wrong. Please try again.");
-      setConfirmation({ order_ref: data.reservation.order_ref, total: data.reservation.total_price });
+      setConfirmation({ order_ref: data.reservation.order_ref, total: data.reservation.total_price, emailSent: !!data.emailSent });
       setStage("completed");
     } catch {
       setContactMsg("Could not submit — please check your connection and try again.");
@@ -411,8 +412,8 @@ export default function BookingPage() {
                   <input className={`${fieldCls} ${errBorder(!!contactMsg && !phone.trim())}`} value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+91 …" type="tel" autoComplete="tel" />
                 </div>
                 <div>
-                  <span className={labelCls}>Email (optional)</span>
-                  <input className={`${fieldCls} border-line2`} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" type="email" autoComplete="email" />
+                  <span className={labelCls}>Email</span>
+                  <input className={`${fieldCls} ${errBorder(!!contactMsg && !email.trim())}`} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email address" type="email" autoComplete="email" />
                 </div>
                 <div>
                   <span className={labelCls}>Notes (optional)</span>
@@ -471,7 +472,9 @@ export default function BookingPage() {
               </div>
               <h2 className="font-heading text-2xl font-bold text-slate">Booking Requested</h2>
               <p className="mx-auto max-w-md text-sm leading-relaxed text-slate-soft">
-                We&apos;ll confirm shortly{confirmation ? ` — your reference is #${confirmation.order_ref}` : ""}.
+                {confirmation?.emailSent
+                  ? <>We&apos;ve emailed you the details and how to pay the 50% deposit to <strong className="text-slate">{email}</strong>. Your reference is #{confirmation.order_ref}.</>
+                  : <>We&apos;ll confirm shortly{confirmation ? ` — your reference is #${confirmation.order_ref}` : ""}. We couldn&apos;t send the confirmation email right now — we&apos;ll contact you on {phone}.</>}
               </p>
               {confirmation && (
                 <p className="font-mono2 text-lg font-semibold text-slate">

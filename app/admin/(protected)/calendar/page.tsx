@@ -22,6 +22,7 @@ export default function CalendarPage() {
   const [reservations, setReservations] = useState<Reservation[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function load() {
@@ -77,7 +78,10 @@ export default function CalendarPage() {
   const selectedReservations = reservations.filter((r) => r.course_date === selected).sort((a, b) => a.course_time.localeCompare(b.course_time));
 
   async function setStatus(id: string, status: ReservationStatus) {
-    await fetch(`/api/reservations/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    const res = await fetch(`/api/reservations/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    const data = await res.json().catch(() => ({}));
+    if (data.emailSent === true) setNotice("Confirmed — confirmation email sent to the customer ✓");
+    else if (data.emailSent === false) setNotice("Confirmed — but the confirmation email could NOT be sent. Please contact the customer directly.");
     load();
   }
   async function erase(id: string, who: string) {
@@ -88,6 +92,12 @@ export default function CalendarPage() {
 
   return (
     <div>
+      {notice && (
+        <div className={`mb-4 flex items-start justify-between gap-3 rounded-xl px-4 py-3 text-sm font-semibold ${notice.includes("NOT") ? "bg-rust-soft text-rust" : "bg-sage-soft text-sage-dark"}`}>
+          <span>{notice}</span>
+          <button onClick={() => setNotice(null)} className="shrink-0 underline">Dismiss</button>
+        </div>
+      )}
       <div className="mb-5 flex items-center justify-between">
         <h2 className="text-2xl font-bold">
           {month.toLocaleDateString("en-US", { month: "long", year: "numeric", timeZone: "UTC" })}

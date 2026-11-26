@@ -144,6 +144,11 @@ const RESERVATION_SELECT = `
                      from public.participants p where p.reservation_id = r.id), '[]'::json) as participants
     from public.reservations r`;
 
+export async function getReservation(id: string): Promise<Reservation | null> {
+  const [row] = await q<Reservation>(`${RESERVATION_SELECT} where r.id = $1`, [id]);
+  return row ?? null;
+}
+
 export async function listReservations(fromDate: string, toDate: string): Promise<Reservation[]> {
   return q<Reservation>(`${RESERVATION_SELECT} where r.course_date between $1::date and $2::date order by r.course_date, r.course_time, r.created_at`, [fromDate, toDate]);
 }

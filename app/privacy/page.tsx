@@ -31,7 +31,7 @@ export default function PrivacyPage() {
 
           <H>2. What we collect</H>
           <ul className="list-disc space-y-1 pl-5">
-            <li><strong>The person who books:</strong> name, phone / WhatsApp number and (optionally) email address.</li>
+            <li><strong>The person who books:</strong> name, phone / WhatsApp number and email address.</li>
             <li><strong>Each participant:</strong> gender, age, body weight and whether they can swim. We do not ask for participants&apos; names.</li>
             <li><strong>The booking:</strong> date, time, number of people, price, any notes you write, and the date and time you accepted the liability waiver.</li>
           </ul>
@@ -42,7 +42,7 @@ export default function PrivacyPage() {
 
           <H>3. Why we use it, and on what legal basis</H>
           <ul className="list-disc space-y-1 pl-5">
-            <li><strong>To provide the surf lesson you booked</strong> — confirming the booking, contacting you about it, and choosing the right board, wetsuit and group for each participant. Legal basis: performance of a contract (GDPR Art. 6(1)(b)).</li>
+            <li><strong>To provide the surf lesson you booked</strong> — confirming the booking, emailing you the booking summary and deposit payment details, contacting you about it, and choosing the right board, wetsuit and group for each participant. Legal basis: performance of a contract (GDPR Art. 6(1)(b)).</li>
             <li><strong>To keep participants safe</strong> — age, weight and swimming ability tell the instructor how to run the lesson safely. Legal basis: performance of a contract (Art. 6(1)(b)) and our legitimate interest in running safe lessons (Art. 6(1)(f)).</li>
             <li><strong>To keep a record that the liability waiver was accepted</strong>, and to establish or defend legal claims. Legal basis: our legitimate interest (Art. 6(1)(f)).</li>
           </ul>
@@ -57,8 +57,8 @@ export default function PrivacyPage() {
           <H>5. Who we share it with</H>
           <p>
             Only with service providers who host this website and its database on our behalf (data processors), under a data processing agreement
-            that requires them to keep the data secure and confidential. The database is hosted by Supabase. We do not share your data with anyone else
-            unless the law requires us to.
+            that requires them to keep the data secure and confidential. The database is hosted by Supabase; We do not share your data with anyone else
+            unless the law requires us to. Booking emails are sent through Google&apos;s Gmail service.
           </p>
 
           <H>6. Transfers outside the EU / EEA</H>
