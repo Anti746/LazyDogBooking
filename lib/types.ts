@@ -43,6 +43,9 @@ export interface Reservation {
   price_per_person: number;
   participants: Participant[];
   number_of_people: number;
+  subtotal: number;
+  /** Group discount (10% off adults when 3+ adults) */
+  discount: number;
   total_price: number;
   special_requests: string | null;
   /** When the booker ticked the liability waiver, and which version they saw */

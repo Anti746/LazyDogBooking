@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MAX_PEOPLE_PER_BOOKING, TIME_SLOTS, WEIGHT_MAX, WEIGHT_MIN, ageRange, totalPrice } from "@/lib/booking";
+import { MAX_PEOPLE_PER_BOOKING, TIME_SLOTS, WEIGHT_MAX, WEIGHT_MIN, ageRange, calcPrice, GROUP_DISCOUNT_MIN_ADULTS } from "@/lib/booking";
 import { WAIVER_CHECKBOX_LABEL, WAIVER_CLAUSES, WAIVER_TITLE, WAIVER_VERSION } from "@/lib/waiver";
+import type { PriceBreakdown } from "@/lib/booking";
 import type { Course, Gender, Participant } from "@/lib/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -10,7 +11,8 @@ import type { Course, Gender, Participant } from "@/lib/types";
 //   1) details — who's coming (one card per person: gender, age, weight,
 //                swimmer / non-swimmer), date and time
 //   2) contact — name / phone / email / notes, summary, liability waiver
-// One product only: the 1 Day Surf Course, flat price per person.
+// One product only: the 1 Day Surf Course, priced per person, 10% off the
+// adults when 3+ adults book together (lib/booking.ts).
 // ─────────────────────────────────────────────────────────────────────────────
 
 type Stage = "details" | "contact" | "completed";
@@ -69,6 +71,17 @@ function Toggle<T extends string | boolean>({ value, options, onChange, bad }: {
         </button>
       ))}
     </div>
+  );
+}
+
+function PriceLines({ price, unit }: { price: PriceBreakdown; unit: number }) {
+  return (
+    <>
+      {price.adults > 0 && <p>{price.adults} adult{price.adults > 1 ? "s" : ""} × {unit.toLocaleString()} Rs = {(price.adults * unit).toLocaleString()} Rs</p>}
+      {price.children > 0 && <p>{price.children} child{price.children > 1 ? "ren" : ""} × {unit.toLocaleString()} Rs = {(price.children * unit).toLocaleString()} Rs</p>}
+      {price.discount > 0 && <p className="text-accent">Group discount (10% off adults) −{price.discount.toLocaleString()} Rs</p>}
+      <p className="pt-1 text-sm font-semibold text-slate">Total <span className="text-accent">{price.total.toLocaleString()} Rs</span></p>
+    </>
   );
 }
 
@@ -164,7 +177,7 @@ export default function BookingPage() {
   useEffect(() => { setDetailsMsg(null); }, [people, date, time]);
   useEffect(() => { setContactMsg(null); }, [name, phone, waiverAccepted]);
 
-  const price = course ? totalPrice(headcount, course.price) : 0;
+  const price = calcPrice(people.map((p) => p.group), course?.price ?? 0);
 
   function personLabel(i: number): string {
     const p = people[i];
@@ -389,9 +402,11 @@ export default function BookingPage() {
               </div>
 
               {course && headcount > 0 && (
-                <div className="flex items-center justify-between rounded-xl border border-line2 bg-surface px-4 py-3 font-mono2 text-sm">
-                  <span className="text-slate-soft">{headcount} × {course.price.toLocaleString()} Rs</span>
-                  <span className="font-semibold text-slate">Total <span className="text-accent">{price.toLocaleString()} Rs</span></span>
+                <div className="space-y-1 rounded-xl border border-line2 bg-surface px-4 py-3 font-mono2 text-xs text-slate-soft">
+                  <PriceLines price={price} unit={course.price} />
+                  {price.discount === 0 && adults > 0 && adults < GROUP_DISCOUNT_MIN_ADULTS && (
+                    <p className="text-[11px]">Book {GROUP_DISCOUNT_MIN_ADULTS}+ adults together and adults get 10% off.</p>
+                  )}
                 </div>
               )}
 
@@ -432,9 +447,7 @@ export default function BookingPage() {
                     {personLabel(i)} — {p.gender === "male" ? "Male" : "Female"}, {p.age} y, {p.weight_kg} kg, {p.swimmer ? "swimmer" : "non-swimmer"}
                   </p>
                 ))}
-                <p className="pt-1 text-sm font-semibold text-slate">
-                  Total: <span className="text-accent">{price.toLocaleString()} Rs</span> <span className="font-normal text-slate-soft">({headcount} × {course?.price.toLocaleString()} Rs)</span>
-                </p>
+                <div className="pt-1"><PriceLines price={price} unit={course?.price ?? 0} /></div>
               </div>
 
               {/* Liability waiver */}

@@ -149,6 +149,7 @@ export default function CalendarPage() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold">{r.total_price.toLocaleString()} Rs</p>
+                      {r.discount > 0 && <p className="text-xs text-sage-dark">group discount −{r.discount.toLocaleString()} Rs</p>}
                       <p className="text-xs text-ink-soft">Waiver ✓ {new Date(r.waiver_accepted_at).toLocaleDateString("en-GB")} (v{r.waiver_version})</p>
                       <span className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-xs font-semibold ${STATUS_CLASS[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                     </div>

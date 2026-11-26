@@ -37,7 +37,25 @@ export function validateParticipants(list: unknown): string | null {
   return null;
 }
 
-/** Flat price: every participant takes the same 1 Day course. */
-export function totalPrice(people: number, pricePerPerson: number): number {
-  return Math.max(0, people) * Math.max(0, pricePerPerson);
+/** Group discount, same rule as the original Surf Wala pricing: 10% off the
+ *  adults' price when 3 or more adults book together. Children pay full price
+ *  and don't count toward the 3. */
+export const GROUP_DISCOUNT_RATE = 0.1;
+export const GROUP_DISCOUNT_MIN_ADULTS = 3;
+
+export interface PriceBreakdown {
+  adults: number;
+  children: number;
+  subtotal: number;
+  discount: number;
+  total: number;
+}
+
+export function calcPrice(groups: Participant["group"][], pricePerPerson: number): PriceBreakdown {
+  const price = Math.max(0, pricePerPerson);
+  const adults = groups.filter((g) => g === "adult").length;
+  const children = groups.length - adults;
+  const subtotal = (adults + children) * price;
+  const discount = adults >= GROUP_DISCOUNT_MIN_ADULTS ? Math.round(adults * price * GROUP_DISCOUNT_RATE) : 0;
+  return { adults, children, subtotal, discount, total: subtotal - discount };
 }

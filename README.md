@@ -30,7 +30,7 @@ Opens at http://localhost:3000
 
 ## Rules
 
-- One product: the 1 Day Surf Course, flat price per person (edit name,
+- One product: the 1 Day Surf Course, price per person, **10% off the adults when 3+ adults book together** (children pay full price and don't count toward the 3). Edit name,
   price and open/closed in Admin → Settings).
 - Max 8 people per booking; max students per day (default 8, single
   instructor) editable in Admin → Settings.

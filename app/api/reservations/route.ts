@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isAuthed } from "@/lib/auth";
-import { TIME_SLOTS, totalPrice, validateParticipants } from "@/lib/booking";
+import { TIME_SLOTS, calcPrice, validateParticipants } from "@/lib/booking";
 import { generateId, mutateDb, readDb, todayLocal } from "@/lib/store";
 import { WAIVER_VERSION } from "@/lib/waiver";
 import type { CreateBookingRequest, Participant, Reservation } from "@/lib/types";
@@ -55,6 +55,7 @@ export async function POST(request: Request) {
         throw new Error(`CAPACITY:${Math.max(0, cap - existing)}:${cap}`);
       }
 
+      const price = calcPrice(participants.map((p) => p.group), db.course.price);
       const now = new Date().toISOString();
       const r: Reservation = {
         id: generateId(),
@@ -71,7 +72,9 @@ export async function POST(request: Request) {
         price_per_person: db.course.price,
         participants,
         number_of_people: participants.length,
-        total_price: totalPrice(participants.length, db.course.price),
+        subtotal: price.subtotal,
+        discount: price.discount,
+        total_price: price.total,
         special_requests: body.special_requests?.trim().slice(0, 500) || null,
         waiver_accepted_at: now,
         // Always record the version the server actually serves, not what the client claims.
