@@ -1,20 +1,18 @@
+begin;
+
 -- ─────────────────────────────────────────────────────────────────────────────
 -- LazyDog Surf — database schema (Supabase / PostgreSQL)
 --
 -- Run once in Supabase → SQL Editor (or `supabase db push`).
 --
 -- Security model (GDPR Art. 25 & 32 — data protection by design, security):
---   • The browser NEVER talks to the database. All access goes through the
---     Next.js API routes on the server, which connect as `lazydog_app` — a
---     dedicated role with only the privileges the app needs (least privilege).
---     Its password lives only in a server-side environment variable.
---   • Row Level Security is ON for every table. Only `lazydog_app` has
---     policies; the public `anon` / `authenticated` roles (Supabase's public
---     API keys) have every privilege revoked, so they can read or write nothing.
---   • `lazydog_app` cannot INSERT bookings directly — only through
---     create_booking(), which checks capacity and inserts in one locked
---     transaction, so two people booking the same day at the same moment
---     can't overbook it.
+--   • The browser NEVER talks to the database with a privileged key. All access
+--     goes through authenticated Next.js API routes or the public booking flow.
+--   • RLS is ON for every table; anon/authenticated have no table grants or
+--     policies. Only a server-side Supabase secret key can use the explicit
+--     service_role grants. That key must never be sent to a browser.
+--   • Booking INSERT is available only through create_booking(), which checks
+--     capacity and inserts in one locked transaction, preventing overbooking.
 --   • purge_expired_personal_data() deletes customer data once the retention
 --     period is over (GDPR Art. 5(1)(e) — storage limitation).
 -- ─────────────────────────────────────────────────────────────────────────────
@@ -80,10 +78,22 @@ alter table public.course       enable row level security;
 alter table public.settings     enable row level security;
 alter table public.reservations enable row level security;
 alter table public.participants enable row level security;
--- (No policies on purpose: anon / authenticated get nothing. service_role
---  bypasses RLS and is only ever used on the server.)
+-- No policies are granted to public roles. Also remove default schema access,
+-- then give the server role only the schema access needed by the API.
+revoke create on schema public from public;
+grant usage on schema public to anon, authenticated, service_role;
+revoke all on public.course, public.settings, public.reservations, public.participants from public, anon, authenticated, service_role;
 
-revoke all on public.course, public.settings, public.reservations, public.participants from anon, authenticated;
+-- Explicit server-only policies document the intended RLS path. Public roles
+-- receive neither policies nor table privileges.
+create policy course_server_read on public.course for select to service_role using (true);
+create policy course_server_update on public.course for update to service_role using (true) with check (true);
+create policy settings_server_read on public.settings for select to service_role using (true);
+create policy settings_server_update on public.settings for update to service_role using (true) with check (true);
+create policy reservations_server_read on public.reservations for select to service_role using (true);
+create policy reservations_server_update on public.reservations for update to service_role using (true) with check (true);
+create policy reservations_server_delete on public.reservations for delete to service_role using (true);
+create policy participants_server_read on public.participants for select to service_role using (true);
 
 -- ── Seed ────────────────────────────────────────────────────────────────────
 
@@ -115,10 +125,19 @@ declare
   v_course   public.course;
   v_cap      integer;
   v_booked   integer;
-  v_people   integer := jsonb_array_length(p_participants);
+  v_people   integer;
+  v_discount integer;
   v_id       uuid;
   v_ref      text;
 begin
+  if jsonb_typeof(p_participants) <> 'array' then
+    raise exception 'INVALID_PARTICIPANTS';
+  end if;
+  v_people := jsonb_array_length(p_participants);
+  if v_people < 1 or v_people > 8 then
+    raise exception 'INVALID_PARTICIPANTS';
+  end if;
+
   -- Serialise bookings for the same day, so the capacity check can't race.
   perform pg_advisory_xact_lock(hashtextextended('lazydog-booking:' || p_course_date::text, 0));
 
@@ -128,6 +147,16 @@ begin
   end if;
   if v_course.price <> p_price_per_person then
     raise exception 'PRICE_CHANGED';
+  end if;
+  if p_course_date <= current_date or p_course_time not in ('08:30', '10:00') then
+    raise exception 'INVALID_BOOKING_DATE_OR_TIME';
+  end if;
+
+  v_discount := case when v_people >= 3 then round((v_people * v_course.price)::numeric * 0.10)::integer else 0 end;
+  if p_subtotal <> v_people * v_course.price
+     or p_discount <> v_discount
+     or p_total_price <> p_subtotal - p_discount then
+    raise exception 'INVALID_PRICE';
   end if;
 
   select max_students_per_day into v_cap from public.settings limit 1;
@@ -178,27 +207,56 @@ as $$
   select count(*)::integer from deleted;
 $$;
 
--- ── The app's own database role (least privilege) ──────────────────────────
--- LOGIN without a password: it can't sign in until you set one (see README —
--- never put the password in this file or in git).
+-- Admin-only data-subject lookup (email, phone or booking reference).
+-- Returns only matching bookings and their minimal participant fields.
+create or replace function public.find_reservations_by_contact(p_term text)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    jsonb_agg(
+      to_jsonb(r) || jsonb_build_object('participants', coalesce(p.people, '[]'::jsonb))
+      order by r.course_date desc
+    ),
+    '[]'::jsonb
+  )
+  from public.reservations r
+  left join lateral (
+    select jsonb_agg(
+      jsonb_build_object('gender', p.gender, 'age', p.age, 'weight_kg', p.weight_kg, 'swimmer', p.swimmer)
+      order by p.position
+    ) as people
+    from public.participants p
+    where p.reservation_id = r.id
+  ) p on true
+  where lower(coalesce(r.customer_email, '')) = lower(p_term)
+     or (
+       length(regexp_replace(p_term, '\D', '', 'g')) >= 6
+       and regexp_replace(r.customer_phone, '\D', '', 'g') like '%' || regexp_replace(p_term, '\D', '', 'g') || '%'
+     )
+     or upper(r.order_ref) = upper(p_term);
+$$;
 
-create role lazydog_app login noinherit;
+-- ── Least-privilege server access ──────────────────────────────────────────
+-- Supabase's service_role is used only in server-only code. Revoke its default
+-- table grants, then grant only operations used by the API. RLS remains enabled
+-- and there are deliberately no policies for anon/authenticated.
+grant usage on schema public to service_role;
+grant select on public.course, public.settings, public.reservations, public.participants to service_role;
+grant update (name, price, is_active, updated_at) on public.course to service_role;
+grant update (max_students_per_day, updated_at) on public.settings to service_role;
+grant update (status, updated_at) on public.reservations to service_role;
+grant delete on public.reservations to service_role;   -- GDPR erasure (participants cascade)
 
-grant usage on schema public to lazydog_app;
-grant select on public.course, public.settings, public.reservations, public.participants to lazydog_app;
-grant update (name, price, is_active, updated_at) on public.course to lazydog_app;
-grant update (max_students_per_day, updated_at) on public.settings to lazydog_app;
-grant update (status, updated_at) on public.reservations to lazydog_app;
-grant delete on public.reservations to lazydog_app;   -- GDPR erasure (participants cascade)
+-- Restrict privileged functions to the server key; do not expose to public API keys.
+revoke all on function public.create_booking(text, text, text, date, text, jsonb, text, text, integer, integer, integer, integer) from public, anon, authenticated, service_role;
+revoke all on function public.purge_expired_personal_data(interval) from public, anon, authenticated, service_role;
+revoke all on function public.find_reservations_by_contact(text) from public, anon, authenticated, service_role;
+grant execute on function public.create_booking(text, text, text, date, text, jsonb, text, text, integer, integer, integer, integer) to service_role;
+grant execute on function public.purge_expired_personal_data(interval) to service_role;
+grant execute on function public.find_reservations_by_contact(text) to service_role;
 
-create policy lazydog_app_all on public.course       for all to lazydog_app using (true) with check (true);
-create policy lazydog_app_all on public.settings     for all to lazydog_app using (true) with check (true);
-create policy lazydog_app_all on public.reservations for all to lazydog_app using (true) with check (true);
-create policy lazydog_app_all on public.participants for all to lazydog_app using (true) with check (true);
-
--- Functions: only lazydog_app may call them (they run as their owner, so the
--- app role itself never needs INSERT rights).
-revoke all on function public.create_booking(text, text, text, date, text, jsonb, text, text, integer, integer, integer, integer) from public, anon, authenticated;
-revoke all on function public.purge_expired_personal_data(interval) from public, anon, authenticated;
-grant execute on function public.create_booking(text, text, text, date, text, jsonb, text, text, integer, integer, integer, integer) to lazydog_app;
-grant execute on function public.purge_expired_personal_data(interval) to lazydog_app;
+commit;

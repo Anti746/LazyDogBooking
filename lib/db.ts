@@ -1,98 +1,89 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// Database access (Supabase Postgres). SERVER ONLY — importing this from a
-// client component fails the build, so the connection string can never end
-// up in the browser bundle.
-//
-// Connects as the `lazydog_app` role (see supabase/migrations/0001_init.sql):
-// it can read, change a booking's status, erase a booking, and create
-// bookings only through create_booking(). Every query is parameterised.
-// ─────────────────────────────────────────────────────────────────────────────
 import "server-only";
-import { Pool, type PoolConfig } from "pg";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import type { Course, Participant, Reservation, ReservationStatus, Settings } from "@/lib/types";
 
-declare global {
-  // Re-use one pool across hot reloads / warm serverless invocations.
-  // eslint-disable-next-line no-var
-  var __lazydogPool: Pool | undefined;
+let adminClient: SupabaseClient | undefined;
+
+function db(): SupabaseClient {
+  if (adminClient) return adminClient;
+
+  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const key = process.env.SUPABASE_SECRET_KEY ?? process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) throw new Error("Supabase server credentials are not configured.");
+
+  adminClient = createClient(url, key, {
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false },
+  });
+  return adminClient;
 }
 
-function sslConfig(): PoolConfig["ssl"] {
-  if (process.env.DATABASE_SSL === "disable") return false; // local development only
-  const ca = process.env.DATABASE_CA_CERT;
-  if (ca) return { ca: ca.replace(/\\n/g, "\n"), rejectUnauthorized: true };
-  // Encrypted, but the server certificate isn't verified. Set DATABASE_CA_CERT
-  // (Supabase → Project Settings → Database → SSL certificate) to verify it.
-  if (process.env.NODE_ENV === "production") {
-    console.warn("[db] DATABASE_CA_CERT is not set — TLS is on but the server certificate is not verified.");
-  }
-  return { rejectUnauthorized: false };
-}
-
-function pool(): Pool {
-  if (!globalThis.__lazydogPool) {
-    const connectionString = process.env.DATABASE_URL;
-    if (!connectionString) throw new Error("DATABASE_URL is not set");
-    globalThis.__lazydogPool = new Pool({
-      connectionString,
-      ssl: sslConfig(),
-      max: 3,
-      idleTimeoutMillis: 10_000,
-      connectionTimeoutMillis: 10_000,
-    });
-  }
-  return globalThis.__lazydogPool;
-}
-
-async function q<T = Record<string, unknown>>(text: string, params: unknown[] = []): Promise<T[]> {
-  const res = await pool().query(text, params);
-  return res.rows as T[];
+function throwDatabaseError(context: string, error: { message: string } | null): never {
+  throw new Error(`${context}: ${error?.message ?? "unknown database error"}`);
 }
 
 // ── Course & settings ────────────────────────────────────────────────────────
 
 export async function getCourse(): Promise<Course> {
-  const [row] = await q<Course>("select id, name, price, is_active from public.course limit 1");
-  return row;
+  const { data, error } = await db().from("course").select("id, name, price, is_active").limit(1).maybeSingle();
+  if (error) throwDatabaseError("Could not load course", error);
+  if (!data) throw new Error("Course configuration is missing.");
+  return data as Course;
 }
 
 export async function updateCourse(patch: Partial<Pick<Course, "name" | "price" | "is_active">>): Promise<Course> {
-  const [row] = await q<Course>(
-    `update public.course set
-       name = coalesce($1, name), price = coalesce($2, price), is_active = coalesce($3, is_active), updated_at = now()
-     returning id, name, price, is_active`,
-    [patch.name ?? null, patch.price ?? null, patch.is_active ?? null],
-  );
-  return row;
+  const { data, error } = await db()
+    .from("course")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .select("id, name, price, is_active")
+    .limit(1)
+    .maybeSingle();
+  if (error) throwDatabaseError("Could not update course", error);
+  if (!data) throw new Error("Course configuration is missing.");
+  return data as Course;
 }
 
 export async function getSettings(): Promise<Settings> {
-  const [row] = await q<Settings>("select max_students_per_day from public.settings limit 1");
-  return row;
+  const { data, error } = await db().from("settings").select("max_students_per_day").limit(1).maybeSingle();
+  if (error) throwDatabaseError("Could not load settings", error);
+  if (!data) throw new Error("Booking settings are missing.");
+  return data as Settings;
 }
 
 export async function updateSettings(patch: Partial<Settings>): Promise<Settings> {
-  const [row] = await q<Settings>(
-    "update public.settings set max_students_per_day = coalesce($1, max_students_per_day), updated_at = now() returning max_students_per_day",
-    [patch.max_students_per_day ?? null],
-  );
-  return row;
+  const { data, error } = await db()
+    .from("settings")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .select("max_students_per_day")
+    .limit(1)
+    .maybeSingle();
+  if (error) throwDatabaseError("Could not update settings", error);
+  if (!data) throw new Error("Booking settings are missing.");
+  return data as Settings;
 }
 
-// ── Availability (counts only — no personal data) ───────────────────────────
+// ── Availability: return counts only, never customer information ─────────────
 
 export async function bookedPerDay(monthYYYYMM: string): Promise<Record<string, number>> {
-  const rows = await q<{ day: string; booked: number }>(
-    `select to_char(course_date, 'YYYY-MM-DD') as day, sum(number_of_people)::int as booked
-       from public.reservations
-      where status <> 'cancelled' and to_char(course_date, 'YYYY-MM') = $1
-      group by course_date`,
-    [monthYYYYMM],
-  );
-  return Object.fromEntries(rows.map((r) => [r.day, r.booked]));
+  const [year, month] = monthYYYYMM.split("-").map(Number);
+  const firstDay = `${monthYYYYMM}-01`;
+  const nextMonth = new Date(Date.UTC(year, month, 1)).toISOString().slice(0, 10);
+  const { data, error } = await db()
+    .from("reservations")
+    .select("course_date, number_of_people")
+    .gte("course_date", firstDay)
+    .lt("course_date", nextMonth)
+    .neq("status", "cancelled");
+  if (error) throwDatabaseError("Could not load availability", error);
+
+  const booked: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const date = String(row.course_date);
+    booked[date] = (booked[date] ?? 0) + Number(row.number_of_people);
+  }
+  return booked;
 }
 
-// ── Bookings ────────────────────────────────────────────────────────────────
+// ── Bookings ──────────────────────────────────────────────────────────────────
 
 export class BookingError extends Error {
   constructor(public code: "CAPACITY" | "BOOKINGS_CLOSED" | "PRICE_CHANGED", public free?: number, public cap?: number) {
@@ -115,34 +106,48 @@ export interface NewBooking {
   total_price: number;
 }
 
-export async function createBooking(b: NewBooking): Promise<{ id: string; order_ref: string; total_price: number }> {
-  try {
-    const [row] = await q<{ result: { id: string; order_ref: string; total_price: number } }>(
-      "select public.create_booking($1, $2, $3, $4::date, $5, $6::jsonb, $7, $8, $9, $10, $11, $12) as result",
-      [
-        b.customer_name, b.customer_phone, b.customer_email, b.course_date, b.course_time,
-        JSON.stringify(b.participants), b.special_requests, b.waiver_version,
-        b.price_per_person, b.subtotal, b.discount, b.total_price,
-      ],
-    );
-    return row.result;
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : "";
-    const cap = /^CAPACITY:(\d+):(\d+)$/.exec(msg);
-    if (cap) throw new BookingError("CAPACITY", Number(cap[1]), Number(cap[2]));
-    if (msg === "BOOKINGS_CLOSED" || msg === "PRICE_CHANGED") throw new BookingError(msg);
-    throw err;
+export async function createBooking(booking: NewBooking): Promise<{ id: string; order_ref: string; total_price: number }> {
+  const { data, error } = await db().rpc("create_booking", {
+    p_customer_name: booking.customer_name,
+    p_customer_phone: booking.customer_phone,
+    p_customer_email: booking.customer_email,
+    p_course_date: booking.course_date,
+    p_course_time: booking.course_time,
+    p_participants: booking.participants,
+    p_special_requests: booking.special_requests,
+    p_waiver_version: booking.waiver_version,
+    p_price_per_person: booking.price_per_person,
+    p_subtotal: booking.subtotal,
+    p_discount: booking.discount,
+    p_total_price: booking.total_price,
+  });
+
+  if (error) {
+    const message = error.message;
+    const capacity = /CAPACITY:(\d+):(\d+)/.exec(message);
+    if (capacity) throw new BookingError("CAPACITY", Number(capacity[1]), Number(capacity[2]));
+    if (message.includes("BOOKINGS_CLOSED")) throw new BookingError("BOOKINGS_CLOSED");
+    if (message.includes("PRICE_CHANGED")) throw new BookingError("PRICE_CHANGED");
+    throwDatabaseError("Could not create booking", error);
   }
+  if (!data || typeof data !== "object") throw new Error("Booking creation returned no result.");
+  return data as { id: string; order_ref: string; total_price: number };
 }
 
-const RESERVATION_SELECT = `
-  select r.id, r.order_ref, r.customer_name, r.customer_phone, r.customer_email,
-         to_char(r.course_date, 'YYYY-MM-DD') as course_date, r.course_time, r.course_name,
-         r.price_per_person, r.number_of_people, r.subtotal, r.discount, r.total_price,
-         r.special_requests, r.waiver_accepted_at, r.waiver_version, r.status, r.created_at, r.updated_at,
-         coalesce((select json_agg(json_build_object('gender', p.gender, 'age', p.age, 'weight_kg', p.weight_kg, 'swimmer', p.swimmer) order by p.position)
-                     from public.participants p where p.reservation_id = r.id), '[]'::json) as participants
-    from public.reservations r`;
+type ReservationRow = Omit<Reservation, "participants"> & {
+  participants: (Participant & { position: number })[];
+};
+
+const RESERVATION_FIELDS = "id, order_ref, customer_name, customer_phone, customer_email, course_date, course_time, course_name, price_per_person, number_of_people, subtotal, discount, total_price, special_requests, waiver_accepted_at, waiver_version, status, created_at, updated_at, participants(gender, age, weight_kg, swimmer, position)";
+
+function withOrderedParticipants(rows: ReservationRow[] | null): Reservation[] {
+  return (rows ?? []).map((row) => ({
+    ...row,
+    participants: [...(row.participants ?? [])]
+      .sort((a, b) => a.position - b.position)
+      .map(({ position: _position, ...participant }) => participant),
+  }));
+}
 
 export async function getReservation(id: string): Promise<Reservation | null> {
   const [row] = await q<Reservation>(`${RESERVATION_SELECT} where r.id = $1`, [id]);
@@ -150,36 +155,43 @@ export async function getReservation(id: string): Promise<Reservation | null> {
 }
 
 export async function listReservations(fromDate: string, toDate: string): Promise<Reservation[]> {
-  return q<Reservation>(`${RESERVATION_SELECT} where r.course_date between $1::date and $2::date order by r.course_date, r.course_time, r.created_at`, [fromDate, toDate]);
+  const { data, error } = await db()
+    .from("reservations")
+    .select(RESERVATION_FIELDS)
+    .gte("course_date", fromDate)
+    .lte("course_date", toDate)
+    .order("course_date", { ascending: true })
+    .order("course_time", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throwDatabaseError("Could not load reservations", error);
+  return withOrderedParticipants(data as ReservationRow[] | null);
 }
 
-/** Data-subject requests (GDPR Art. 15 / 17): find everything for one person. */
 export async function findReservationsByContact(term: string): Promise<Reservation[]> {
-  const t = term.trim();
-  const digits = t.replace(/\D/g, "");
-  return q<Reservation>(
-    `${RESERVATION_SELECT}
-      where lower(r.customer_email) = lower($1)
-         or ($2 <> '' and length($2) >= 6 and regexp_replace(r.customer_phone, '\\D', '', 'g') like '%' || $2 || '%')
-         or upper(r.order_ref) = upper($1)
-      order by r.course_date desc`,
-    [t, digits],
-  );
+  const { data, error } = await db().rpc("find_reservations_by_contact", { p_term: term.trim() });
+  if (error) throwDatabaseError("Could not search reservations", error);
+  return withOrderedParticipants(data as ReservationRow[] | null);
 }
 
 export async function setReservationStatus(id: string, status: ReservationStatus): Promise<boolean> {
-  const rows = await q("update public.reservations set status = $2, updated_at = now() where id = $1 returning id", [id, status]);
-  return rows.length > 0;
+  const { data, error } = await db()
+    .from("reservations")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
+  if (error) throwDatabaseError("Could not update reservation", error);
+  return Boolean(data);
 }
 
-/** GDPR erasure: removes the booking and (by cascade) its participants. */
 export async function deleteReservation(id: string): Promise<boolean> {
-  const rows = await q("delete from public.reservations where id = $1 returning id", [id]);
-  return rows.length > 0;
+  const { data, error } = await db().from("reservations").delete().eq("id", id).select("id").maybeSingle();
+  if (error) throwDatabaseError("Could not delete reservation", error);
+  return Boolean(data);
 }
 
-/** Deletes bookings past the retention period. Returns how many were removed. */
 export async function purgeExpiredPersonalData(): Promise<number> {
-  const [row] = await q<{ n: number }>("select public.purge_expired_personal_data() as n");
-  return row.n;
+  const { data, error } = await db().rpc("purge_expired_personal_data", { p_older_than: "24 months" });
+  if (error) throwDatabaseError("Could not purge expired personal data", error);
+  return Number(data ?? 0);
 }
