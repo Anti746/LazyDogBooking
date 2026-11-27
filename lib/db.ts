@@ -150,8 +150,9 @@ function withOrderedParticipants(rows: ReservationRow[] | null): Reservation[] {
 }
 
 export async function getReservation(id: string): Promise<Reservation | null> {
-  const [row] = await q<Reservation>(`${RESERVATION_SELECT} where r.id = $1`, [id]);
-  return row ?? null;
+  const { data, error } = await db().from("reservations").select(RESERVATION_FIELDS).eq("id", id).maybeSingle();
+  if (error) throwDatabaseError("Could not load reservation", error);
+  return data ? withOrderedParticipants([data as ReservationRow])[0] : null;
 }
 
 export async function listReservations(fromDate: string, toDate: string): Promise<Reservation[]> {
